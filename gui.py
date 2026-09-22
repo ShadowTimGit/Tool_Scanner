@@ -18,7 +18,14 @@ from settings_menu.metadata_settings import MetadataSettings
 from settings_menu.tool_settings import ToolSettings
 
 from version import APP_VERSION
-from updater import check_for_updates
+import webbrowser
+from tkinter import messagebox
+
+from updater import (
+    check_for_updates,
+    download_update,
+    start_update,
+)
 
 class ToolScannerGUI(
     VideoMixin,
@@ -86,7 +93,7 @@ class ToolScannerGUI(
         self.create_gui()
 
         self.check_for_updates()
-        
+
         self.status_label.config(
             text="Loading camera..."
         )
@@ -104,14 +111,94 @@ class ToolScannerGUI(
         self,
         latest_version,
         release_url,
+        zip_url,
     ):
         self.root.after(
             0,
             lambda: self.show_update_dialog(
                 latest_version,
                 release_url,
+                zip_url,
             ),
         )
+
+
+    def show_update_dialog(
+        self,
+        latest_version,
+        release_url,
+        zip_url,
+    ):
+        result = messagebox.askyesno(
+            "Update Available",
+            (
+                "A new version of Object Scanner "
+                "is available.\n\n"
+                f"Current version: {APP_VERSION}\n"
+                f"Latest version: {latest_version}\n\n"
+                "Would you like to update now?"
+            ),
+        )
+
+        if not result:
+            return
+
+        self.download_and_install_update(
+            zip_url
+        )
+
+
+    def download_and_install_update(
+        self,
+        zip_url,
+    ):
+        messagebox.showinfo(
+            "Updating",
+            (
+                "The update is being downloaded.\n\n"
+                "Object Scanner will restart "
+                "automatically when finished."
+            ),
+        )
+
+        download_update(
+            zip_url,
+            self.update_download_finished,
+        )
+
+
+    def update_download_finished(
+        self,
+        temp_dir,
+        zip_path,
+    ):
+        self.root.after(
+            0,
+            lambda: self.finish_update(
+                temp_dir,
+                zip_path,
+            ),
+        )
+
+
+    def finish_update(
+        self,
+        temp_dir,
+        zip_path,
+    ):
+        project_dir = os.path.dirname(
+            os.path.abspath(__file__)
+        )
+
+        success = start_update(
+            zip_path,
+            project_dir,
+        )
+
+        if success:
+            self.stop()
+
+            
     def create_gui(self):
         self.create_right_panel()
 
