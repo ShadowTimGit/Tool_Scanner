@@ -178,35 +178,17 @@ def start_update(
                 "update_helper.py was not found."
             )
 
-        helper_dir = tempfile.mkdtemp(
-            prefix="tool_scanner_helper_"
-        )
-
-        helper_path = os.path.join(
-            helper_dir,
-            "update_helper.py",
-        )
-
-        shutil.copy2(
-            helper_source,
-            helper_path,
-        )
-
         import subprocess
 
         subprocess.Popen(
             [
                 sys.executable,
-                helper_path,
+                helper_source,
                 str(os.getpid()),
                 zip_path,
                 project_dir,
             ],
-            creationflags=(
-                subprocess.CREATE_NO_WINDOW
-                if os.name == "nt"
-                else 0
-            ),
+            cwd=project_dir,
         )
 
         return True

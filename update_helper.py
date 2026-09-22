@@ -6,21 +6,67 @@ import time
 import zipfile
 
 
+def log(message):
+    print(
+        f"[UPDATE HELPER] {message}",
+        flush=True,
+    )
+
+
 def wait_for_process(
     process_id,
 ):
-    while True:
-        try:
-            os.kill(
-                process_id,
-                0,
+    log(
+        f"Waiting for process {process_id}..."
+    )
+
+    try:
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        SYNCHRONIZE = 0x00100000
+
+        kernel32 = ctypes.windll.kernel32
+
+        handle = kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION
+            | SYNCHRONIZE,
+            False,
+            process_id,
+        )
+
+        if not handle:
+            log(
+                "Process is already closed."
+            )
+            return
+
+        INFINITE = 0xFFFFFFFF
+
+        result = kernel32.WaitForSingleObject(
+            handle,
+            INFINITE,
+        )
+
+        kernel32.CloseHandle(
+            handle
+        )
+
+        if result == 0:
+            log(
+                "Object Scanner has closed."
+            )
+        else:
+            raise RuntimeError(
+                f"WaitForSingleObject failed: "
+                f"{result}"
             )
 
-            time.sleep(0.5)
-
-        except OSError:
-            break
-
+    except Exception as e:
+        log(
+            f"Process wait failed: {e}"
+        )
+        raise
 
 def find_source_directory(
     extract_dir,
@@ -40,6 +86,10 @@ def find_source_directory(
         )
     ]
 
+    log(
+        f"Extracted directories: {directories}"
+    )
+
     if len(directories) == 1:
         return os.path.join(
             extract_dir,
@@ -53,9 +103,26 @@ def copy_directory_contents(
     source_dir,
     destination_dir,
 ):
+    log(
+        f"Copying files from:\n"
+        f"{source_dir}\n"
+        f"to:\n"
+        f"{destination_dir}"
+    )
+
     for name in os.listdir(
         source_dir
     ):
+        if name in (
+            ".git",
+            ".venv",
+        ):
+            log(
+                f"Skipping: {name}"
+            )
+
+            continue
+
         source_path = os.path.join(
             source_dir,
             name,
@@ -66,15 +133,13 @@ def copy_directory_contents(
             name,
         )
 
-        if name == ".git":
-            continue
-
-        if name == ".venv":
-            continue
-
         if os.path.isdir(
             source_path
         ):
+            log(
+                f"Copying directory: {name}"
+            )
+
             shutil.copytree(
                 source_path,
                 destination_path,
@@ -82,6 +147,10 @@ def copy_directory_contents(
             )
 
         else:
+            log(
+                f"Copying file: {name}"
+            )
+
             shutil.copy2(
                 source_path,
                 destination_path,
@@ -94,6 +163,10 @@ def restart_application(
     main_path = os.path.join(
         project_dir,
         "main.py",
+    )
+
+    log(
+        f"Restarting: {main_path}"
     )
 
     subprocess.Popen(
@@ -116,22 +189,42 @@ def perform_update(
     )
 
     try:
-        print(
-            "Waiting for Object Scanner to close..."
+        log("Updater started.")
+
+        log(
+            f"Process ID: {process_id}"
         )
+
+        log(
+            f"ZIP: {zip_path}"
+        )
+
+        log(
+            f"Project directory: {project_dir}"
+        )
+
+        if not os.path.exists(
+            zip_path
+        ):
+            raise FileNotFoundError(
+                f"ZIP does not exist: {zip_path}"
+            )
 
         wait_for_process(
             process_id
         )
 
-        print(
-            "Extracting update..."
+        log(
+            f"Creating extraction directory: "
+            f"{extract_dir}"
         )
 
         os.makedirs(
             extract_dir,
             exist_ok=True,
         )
+
+        log("Extracting ZIP...")
 
         with zipfile.ZipFile(
             zip_path,
@@ -141,12 +234,14 @@ def perform_update(
                 extract_dir
             )
 
+        log("ZIP extracted.")
+
         source_dir = find_source_directory(
             extract_dir
         )
 
-        print(
-            "Installing update..."
+        log(
+            f"Source directory: {source_dir}"
         )
 
         copy_directory_contents(
@@ -154,27 +249,57 @@ def perform_update(
             project_dir,
         )
 
-        print(
-            "Starting Object Scanner..."
-        )
+        log("Update files copied.")
 
         restart_application(
             project_dir
         )
 
+        log(
+            "Update completed successfully."
+        )
+
     except Exception as e:
-        print(
-            f"Update installation failed: {e}"
+        log(
+            f"UPDATE FAILED: {e}"
+        )
+
+        input(
+            "Press Enter to close..."
         )
 
 
 def main():
+    log(
+        f"Arguments: {sys.argv}"
+    )
+
     if len(sys.argv) != 4:
+        log(
+            "Invalid arguments."
+        )
+
+        input(
+            "Press Enter to close..."
+        )
+
         return
 
-    process_id = int(
-        sys.argv[1]
-    )
+    try:
+        process_id = int(
+            sys.argv[1]
+        )
+
+    except ValueError:
+        log(
+            "Invalid process ID."
+        )
+
+        input(
+            "Press Enter to close..."
+        )
+
+        return
 
     zip_path = sys.argv[2]
 
