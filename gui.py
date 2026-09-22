@@ -18,6 +18,7 @@ from settings_menu.metadata_settings import MetadataSettings
 from settings_menu.tool_settings import ToolSettings
 
 from version import APP_VERSION
+from updater import check_for_updates
 
 class ToolScannerGUI(
     VideoMixin,
@@ -85,14 +86,32 @@ class ToolScannerGUI(
         self.create_gui()
 
         self.check_for_updates()
-
+        
         self.status_label.config(
             text="Loading camera..."
         )
 
         self.start_camera_initialization()
 
+    def check_for_updates(self):
+        check_for_updates(
+            APP_VERSION,
+            self.show_update,
+        )
 
+
+    def show_update(
+        self,
+        latest_version,
+        release_url,
+    ):
+        self.root.after(
+            0,
+            lambda: self.show_update_dialog(
+                latest_version,
+                release_url,
+            ),
+        )
     def create_gui(self):
         self.create_right_panel()
 
