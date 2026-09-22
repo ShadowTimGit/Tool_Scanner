@@ -1,4 +1,5 @@
 import tkinter as tk
+import os
 
 from GUI.gui_camera import CameraMixin
 from GUI.gui_constants import (
