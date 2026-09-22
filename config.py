@@ -1,8 +1,10 @@
+import os
+
 DEFAULT_VIDEO_SOURCE = 0
 
-OUTPUT_DIR = "Output/Images/Inventory"
+OUTPUT_DIR = "Output/Images"
 
-LOG_DIR = "Output/Logs"
+# LOG_DIR = os.path.join(OUTPUT_DIR, "Logs")
 
 # DOCUMENTS_DIR = (
 #     Path.home()

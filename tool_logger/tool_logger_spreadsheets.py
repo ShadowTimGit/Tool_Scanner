@@ -21,11 +21,22 @@ from tool_logger.tool_logger_config import (
     SIMPLIFIED_INVENTORY_HEADERS,
     OVERVIEW_HEADERS,
     LOG_ROOT,
+    INPUT_ROOT,
 )
+
+#INPUT_ROOT tool logger config = OUTPUT_DIR (it triggers a function that pulls it from settings or default if settings doesnt exist)
 
 from settings_menu.inventory_settings import (
     InventorySettings,
 )
+
+OUTPUT_DIR_LOG_NAME = "Converted_Tool_Logs"
+
+PURCHASE_OUTPUT_DIR_NAME = "Purchases"
+
+SALE_OUTPUT_DIR_NAME = "Sales"
+
+SALE_INVOICE_PREFIX = "SALE"
 
 # ==================================================
 # Column Sizes
@@ -34,7 +45,7 @@ small_col = 12
 med_col = 15
 average_col = 18
 large_col = 22
-file_loc_col = 150
+file_loc_col = 50
 
 # ==================================================
 # Workbook
@@ -190,16 +201,33 @@ def load_sheet_rows(
         2,
         worksheet.max_row + 1,
     ):
-        values = [
-            worksheet.cell(
+        values = []
+
+        for column in range(
+            1,
+            len(headers) + 1,
+        ):
+            cell = worksheet.cell(
                 row=row_number,
                 column=column,
-            ).value
-            for column in range(
-                1,
-                len(headers) + 1,
             )
-        ]
+
+            header = headers[column - 1]
+
+            if header in {
+                "File Path to JSON",
+                "File Path to Image",
+            } and cell.hyperlink:
+                target = cell.hyperlink.target
+
+                values.append(
+                    str(target).strip()
+                    if target
+                    else cell.value
+                )
+
+            else:
+                values.append(cell.value)
 
         if not any(
             value is not None
@@ -1428,6 +1456,84 @@ def format_simplified_inventory_sheet(
             vertical="center",
         )
 
+def format_image_hyperlinks(
+    worksheet,
+):
+    image_column = None
+
+    for cell in worksheet[1]:
+        if cell.value == "File Path to Image":
+            image_column = cell.column
+            break
+
+    if image_column is None:
+        return
+
+    for row_number in range(
+        2,
+        worksheet.max_row + 1,
+    ):
+        cell = worksheet.cell(
+            row=row_number,
+            column=image_column,
+        )
+
+        if not cell.value:
+            continue
+
+        image_path = str(
+            cell.value
+        ).strip()
+
+        if not image_path:
+            continue
+
+        if not os.path.exists(image_path):
+            continue
+
+        cell.hyperlink = image_path
+        cell.value = os.path.basename(image_path)
+        cell.style = "Hyperlink"
+
+def format_json_hyperlinks(
+    worksheet,
+):
+    image_column = None
+
+    for cell in worksheet[1]:
+        if cell.value == "File Path to JSON":
+            image_column = cell.column
+            break
+
+    if image_column is None:
+        return
+
+    for row_number in range(
+        2,
+        worksheet.max_row + 1,
+    ):
+        cell = worksheet.cell(
+            row=row_number,
+            column=image_column,
+        )
+
+        if not cell.value:
+            continue
+
+        json_path = str(
+            cell.value
+        ).strip()
+
+        if not json_path:
+            continue
+
+        if not os.path.exists(json_path):
+            continue
+
+        cell.hyperlink = json_path
+        cell.value = os.path.basename(json_path)
+        cell.style = "Hyperlink"
+
 def purchase_sort_key(row):
     invoice = str(
         row.get("Invoice #", "")
@@ -2623,7 +2729,500 @@ def calculate_purchase_values(
 
     return
 
+# ==================================================
+# JSON Sync Debug Helpers
+# ==================================================
+
+JSON_SYNC_DEBUG = True
+
+
+def debug_json_sync(message):
+    if JSON_SYNC_DEBUG:
+        print(
+            f"[JSON SYNC DEBUG] {message}"
+        )
+
+
+def debug_json_sync_row(
+    worksheet,
+    row_number,
+    headers,
+):
+    if not JSON_SYNC_DEBUG:
+        return
+
+    values = {}
+
+    for header in headers:
+        for cell in worksheet[row_number]:
+            if cell.column == worksheet[1][headers.index(header)].column:
+                values[header] = cell.value
+                break
+
+    debug_json_sync(
+        f"Row {row_number} data: {values}"
+    )
+
+
+def debug_json_sync_path(
+    worksheet,
+    row_number,
+    json_column,
+):
+    if not JSON_SYNC_DEBUG:
+        return
+
+    cell = worksheet.cell(
+        row=row_number,
+        column=json_column,
+    )
+
+    debug_json_sync(
+        f"Row {row_number} JSON cell:"
+    )
+
+    debug_json_sync(
+        f"  value     = {cell.value!r}"
+    )
+
+    debug_json_sync(
+        f"  hyperlink = "
+        f"{cell.hyperlink.target if cell.hyperlink else None!r}"
+    )
+
+    debug_json_sync(
+        f"  resolved  = "
+        f"{get_json_path_from_cell(cell)!r}"
+    )
+
+
+def debug_json_sync_comparison(
+    existing_data,
+    workbook_data,
+):
+    if not JSON_SYNC_DEBUG:
+        return
+
+    all_keys = sorted(
+        set(existing_data) | set(workbook_data)
+    )
+
+    debug_json_sync(
+        "Comparing JSON against workbook:"
+    )
+
+    changed = False
+
+    for key in all_keys:
+
+        existing_value = normalize_json_value(
+            existing_data.get(key)
+        )
+
+        workbook_value = normalize_json_value(
+            workbook_data.get(key)
+        )
+
+        if existing_value != workbook_value:
+
+            changed = True
+
+            debug_json_sync(
+                f"  DIFFERENT: {key!r}"
+            )
+
+            debug_json_sync(
+                f"    JSON      = {existing_value!r}"
+            )
+
+            debug_json_sync(
+                f"    WORKBOOK  = {workbook_value!r}"
+            )
+
+        elif JSON_SYNC_DEBUG:
+            debug_json_sync(
+                f"  SAME: {key!r} = {existing_value!r}"
+            )
+
+    if not changed:
+        debug_json_sync(
+            "  No differences found."
+        )
+
+    return changed
+
+
+def debug_json_sync_file(
+    json_path,
+):
+    if not JSON_SYNC_DEBUG:
+        return
+
+    debug_json_sync(
+        f"Checking JSON file:"
+    )
+
+    debug_json_sync(
+        f"  path   = {json_path!r}"
+    )
+
+    debug_json_sync(
+        f"  exists = {os.path.exists(json_path)}"
+    )
+
+    debug_json_sync(
+        f"  file   = {os.path.isfile(json_path)}"
+    )
+
+    if os.path.exists(json_path):
+
+        try:
+            debug_json_sync(
+                f"  size   = "
+                f"{os.path.getsize(json_path)} bytes"
+            )
+        except OSError as error:
+            debug_json_sync(
+                f"  size error = {error}"
+            )
+
+def get_json_path_from_cell(
+    cell,
+):
+    # The displayed cell value may only be the filename.
+    # Use the hyperlink target when available so we recover
+    # the original full filesystem path.
+    if cell.hyperlink:
+        target = cell.hyperlink.target
+
+        if target:
+            return str(
+                target
+            ).strip()
+
+    if cell.value:
+        return str(
+            cell.value
+        ).strip()
+
+    return ""
+
+def json_safe_value(value):
+    """
+    Convert Excel/Python values into values that can safely be
+    stored in JSON and compared consistently later.
+    """
+    if isinstance(value, datetime):
+        return value.isoformat()
+
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+
+    return str(value)
+
+
+def normalize_json_value(value):
+    """
+    Normalize values before comparing workbook data against JSON data.
+    """
+    if isinstance(value, datetime):
+        return value.isoformat()
+
+    return value
+
+
+def build_json_data_from_row(
+    worksheet,
+    row_number,
+    headers,
+    header_columns,
+    sheet_name,
+    invoice_prices,
+):
+    """
+    Build the JSON representation of one workbook row.
+    """
+
+    excluded_headers = {
+        "File Path to JSON",
+        "Sold",
+        "Est. Value",
+        "Est. Value Fraction",
+        "Est. Purchase Price",
+        "Inventory Found",
+        "Profit",
+    }
+
+    data = {}
+
+    for header in headers:
+
+        if header in excluded_headers:
+            continue
+
+        if header not in header_columns:
+            continue
+
+        column = header_columns[header]
+
+        value = worksheet.cell(
+            row=row_number,
+            column=column,
+        ).value
+
+        if header == "Invoice #":
+            data["Invoice"] = json_safe_value(value)
+        else:
+            data[header] = json_safe_value(value)
+
+    if sheet_name == "Purchases":
+
+        data["Inventory Type"] = "purchase"
+
+        invoice = normalize_invoice(
+            data.get("eBay ID")
+        )
+
+        if invoice and invoice in invoice_prices:
+            data["Invoice Price"] = json_safe_value(
+                invoice_prices[invoice]
+            )
+
+    elif sheet_name == "Sales":
+
+        data["Inventory Type"] = "sale"
+
+    return data
+
+
+def json_data_changed(
+    existing_data,
+    workbook_data,
+):
+    """
+    Return True when the workbook contains information that differs
+    from the JSON.
+    """
+
+    all_keys = set(existing_data) | set(workbook_data)
+
+    for key in all_keys:
+
+        if key == "File Path to JSON":
+            continue
+
+        existing_value = normalize_json_value(
+            existing_data.get(key)
+        )
+
+        workbook_value = normalize_json_value(
+            workbook_data.get(key)
+        )
+
+        if existing_value != workbook_value:
+            return True
+
+    return False
+
+
+def create_new_json_path(
+    sheet_name,
+    row_number,
+    worksheet,
+    header_columns,
+):
+    # ---------------------------------------------------------
+    # Determine Purchase / Sale prefix and folder.
+    # ---------------------------------------------------------
+
+    if sheet_name == "Purchases":
+        prefix = "P"
+        sheet_folder = "Purchases"
+    else:
+        prefix = "S"
+        sheet_folder = "Sales"
+
+    # ---------------------------------------------------------
+    # Get invoice title.
+    # ---------------------------------------------------------
+
+    invoice_title_column = (
+        header_columns.get("Invoice")
+        or header_columns.get("Invoice #")
+        or header_columns.get("Invoice Name")
+    )
+
+    if invoice_title_column is None:
+        raise ValueError(
+            f"Could not find invoice title column in {sheet_name}."
+        )
+
+    invoice_title = worksheet.cell(
+        row=row_number,
+        column=invoice_title_column,
+    ).value
+
+    if invoice_title is None or not str(invoice_title).strip():
+        raise ValueError(
+            f"Row {row_number} has no invoice title."
+        )
+
+    invoice_title = str(invoice_title).strip()
+
+    # ---------------------------------------------------------
+    # Make invoice title safe for use as a folder name.
+    # ---------------------------------------------------------
+
+    invalid_characters = '<>:"/\\|?*'
+
+    safe_invoice_title = "".join(
+        "_"
+        if character in invalid_characters
+        else character
+        for character in invoice_title
+    ).strip()
+
+    if not safe_invoice_title:
+        raise ValueError(
+            f"Invoice title cannot be used as a folder name: "
+            f"{invoice_title!r}"
+        )
+
+    # ---------------------------------------------------------
+    # Get invoice date.
+    # ---------------------------------------------------------
+
+    date_column = (
+        header_columns.get("Date")
+        or header_columns.get("Invoice Date")
+        or header_columns.get("Sale Date")
+        or header_columns.get("Purchase Date")
+    )
+
+    if date_column is None:
+        raise ValueError(
+            f"Could not find date column in {sheet_name}."
+        )
+
+    invoice_date = worksheet.cell(
+        row=row_number,
+        column=date_column,
+    ).value
+
+    if invoice_date is None:
+        raise ValueError(
+            f"Row {row_number} has no invoice date."
+        )
+
+    # ---------------------------------------------------------
+    # Convert date to YYYYMM.
+    # ---------------------------------------------------------
+
+    if hasattr(invoice_date, "year") and hasattr(
+        invoice_date,
+        "month",
+    ):
+
+        year_month = (
+            f"{invoice_date.year:04d}"
+            f"{invoice_date.month:02d}"
+        )
+
+    else:
+
+        try:
+            parsed_date = datetime.strptime(
+                str(invoice_date).strip(),
+                "%Y-%m-%d",
+            )
+
+            year_month = (
+                f"{parsed_date.year:04d}"
+                f"{parsed_date.month:02d}"
+            )
+
+        except ValueError as error:
+            raise ValueError(
+                f"Could not determine invoice date from "
+                f"{invoice_date!r}."
+            ) from error
+
+    # ---------------------------------------------------------
+    # Build:
+    #
+    # Output/
+    #   Logs/
+    #     Purchases/
+    #       Invoice #/
+    #
+    # or
+    #
+    # Output/
+    #   Logs/
+    #     Sales/
+    #       Invoice #/
+    # ---------------------------------------------------------
+
+    output_directory = INPUT_ROOT
+
+    invoice_folder = os.path.join(
+        output_directory,
+        sheet_folder,
+        safe_invoice_title,
+    )
+
+    os.makedirs(
+        invoice_folder,
+        exist_ok=True,
+    )
+
+    # ---------------------------------------------------------
+    # Find next object number for this invoice.
+    #
+    # Example:
+    #
+    # S_202609_001.json
+    # S_202609_002.json
+    # S_202609_003.json
+    #
+    # Next = 004
+    # ---------------------------------------------------------
+
+    existing_numbers = []
+    filename_prefix = f"{safe_invoice_title}_"
+    filename_suffix = "_Logged.json"
+
+    for filename in os.listdir(invoice_folder):
+        if not filename.startswith(filename_prefix):
+            continue
+
+        if not filename.endswith(filename_suffix):
+            continue
+
+        number_part = filename[
+            len(filename_prefix):-len(filename_suffix)
+        ]
+
+        if number_part.isdigit():
+            existing_numbers.append(int(number_part))
+
+    next_number = max(
+        existing_numbers,
+        default=0,
+    ) + 1
+
+    filename = (
+        f"{safe_invoice_title}_"
+        f"{next_number:03d}_Logged.json"
+    )
+
+    return os.path.join(
+        invoice_folder,
+        filename,
+    )
+
 def sync_json_from_workbook():
+
     workbook_path = get_workbook_path()
 
     if not os.path.exists(workbook_path):
@@ -2637,6 +3236,7 @@ def sync_json_from_workbook():
     )
 
     updated_count = 0
+    created_count = 0
     skipped_count = 0
 
     sheets = (
@@ -2644,39 +3244,55 @@ def sync_json_from_workbook():
         ("Sales", SALE_HEADERS),
     )
 
-    for sheet_name, headers in sheets:
+    try:
 
-        worksheet = workbook[sheet_name]
+        for sheet_name, headers in sheets:
 
-        header_columns = {
-            cell.value: cell.column
-            for cell in worksheet[1]
-            if cell.value is not None
-        }
+            if sheet_name not in workbook.sheetnames:
+                continue
 
-        # -------------------------------------------------
-        # Build invoice-price lookup for Purchases.
-        #
-        # The manually entered Invoice Price is located
-        # in the generated summary row beneath each group.
-        #
-        # C = eBay ID
-        # N = Invoice Price label
-        # O = Invoice Price value
-        # -------------------------------------------------
+            worksheet = workbook[sheet_name]
 
-        invoice_prices = {}
+            header_columns = {
+                cell.value: cell.column
+                for cell in worksheet[1]
+                if cell.value is not None
+            }
 
-        if sheet_name == "Purchases":
+            # -------------------------------------------------
+            # Build invoice-price lookup for Purchases.
+            # -------------------------------------------------
 
-            for summary_row in range(
+            invoice_prices = {}
+
+            if sheet_name == "Purchases":
+                invoice_prices = load_invoice_prices(
+                    worksheet
+                )
+
+            json_column = header_columns.get(
+                "File Path to JSON"
+            )
+
+            if json_column is None:
+                continue
+
+            # -------------------------------------------------
+            # Process each actual workbook row.
+            # -------------------------------------------------
+
+            for row_number in range(
                 2,
                 worksheet.max_row + 1,
             ):
 
+                # ---------------------------------------------
+                # Get all row values.
+                # ---------------------------------------------
+
                 row_values = [
                     worksheet.cell(
-                        row=summary_row,
+                        row=row_number,
                         column=column,
                     ).value
                     for column in range(
@@ -2685,345 +3301,304 @@ def sync_json_from_workbook():
                     )
                 ]
 
-                if "Invoice Est. Sum" not in row_values:
-                    continue
+                # ---------------------------------------------
+                # Skip completely empty rows.
+                # ---------------------------------------------
 
-                # C = eBay ID
-                invoice = normalize_invoice(
-                    row_values[2]
-                )
-
-                if not invoice:
-                    continue
-
-                # O = Invoice Price
-                invoice_price = row_values[14]
-
-                if invoice_price is None:
-                    continue
-
-                if isinstance(
-                    invoice_price,
-                    str,
+                if not any(
+                    value is not None
+                    and str(value).strip()
+                    for value in row_values
                 ):
-                    invoice_price = invoice_price.strip()
+                    continue
 
-                    if not invoice_price:
-                        continue
+                # ---------------------------------------------
+                # Skip generated summary rows.
+                # ---------------------------------------------
 
-                try:
-                    invoice_price = float(
-                        invoice_price
+                summary_found = any(
+                    isinstance(value, str)
+                    and (
+                        value.strip() in {
+                            "Total Sales:",
+                            "Total Purchases:",
+                            "Invoice Est. Sum",
+                            "Sales:",
+                            "Profit:",
+                            "Total Profit:",
+                        }
+                        or value.strip().startswith(
+                            (
+                                "Total Sales:",
+                                "Total Purchases:",
+                                "Invoice Est. Sum",
+                                "Sales:",
+                                "Profit:",
+                                "Total Profit:",
+                            )
+                        )
                     )
-                except (
-                    TypeError,
-                    ValueError,
-                ):
-                    continue
-
-                invoice_prices[invoice] = (
-                    invoice_price
+                    for value in row_values
                 )
 
-        json_column = header_columns.get(
-            "File Path to JSON"
-        )
+                if summary_found:
+                    continue
 
-        if json_column is None:
-            continue
+                # ---------------------------------------------
+                # Get JSON path from workbook.
+                # ---------------------------------------------
 
-        for row_number in range(
-            2,
-            worksheet.max_row + 1,
-        ):
-
-            row_values = [
-                worksheet.cell(
+                json_cell = worksheet.cell(
                     row=row_number,
-                    column=column,
-                ).value
-                for column in range(
-                    1,
-                    worksheet.max_column + 1,
-                )
-            ]
-
-            # Skip completely empty rows.
-            if not any(
-                value is not None
-                and str(value).strip()
-                for value in row_values
-            ):
-                continue
-
-            # Skip generated invoice summary rows.
-            if "Invoice Est. Sum" in row_values:
-                continue
-
-            json_path = worksheet.cell(
-                row=row_number,
-                column=json_column,
-            ).value
-
-            if not json_path:
-                skipped_count += 1
-                continue
-
-            json_path = str(
-                json_path
-            ).strip()
-
-            # -------------------------------------------------
-            # Find the JSON file.
-            # -------------------------------------------------
-
-            if not os.path.exists(json_path):
-
-                if json_path.endswith(
-                    "_Unlogged.json"
-                ):
-
-                    logged_path = json_path.replace(
-                        "_Unlogged.json",
-                        "_Logged.json",
-                    )
-
-                    if os.path.exists(
-                        logged_path
-                    ):
-                        json_path = logged_path
-
-                elif json_path.endswith(
-                    "_Logged.json"
-                ):
-
-                    unlogged_path = json_path.replace(
-                        "_Logged.json",
-                        "_Unlogged.json",
-                    )
-
-                    if os.path.exists(
-                        unlogged_path
-                    ):
-                        json_path = unlogged_path
-
-            if not os.path.exists(json_path):
-
-                print(
-                    f"  JSON not found: {json_path}"
+                    column=json_column,
                 )
 
-                skipped_count += 1
-                continue
-
-            # -------------------------------------------------
-            # Load JSON
-            # -------------------------------------------------
-
-            try:
-
-                with open(
-                    json_path,
-                    "r",
-                    encoding="utf-8",
-                ) as file:
-
-                    data = json.load(file)
-
-            except (
-                OSError,
-                json.JSONDecodeError,
-            ) as error:
-
-                print(
-                    f"  Failed to read JSON: "
-                    f"{json_path}"
+                stored_json_path = get_json_path_from_cell(
+                    json_cell
                 )
 
-                print(
-                    f"    {error}"
-                )
-
-                skipped_count += 1
-                continue
-
-            if not isinstance(
-                data,
-                dict,
-            ):
-
-                print(
-                    f"  Invalid JSON structure: "
-                    f"{json_path}"
-                )
-
-                skipped_count += 1
-                continue
-
-            changed = False
-
-            # -------------------------------------------------
-            # Copy normal editable spreadsheet fields back
-            # into JSON.
-            # -------------------------------------------------
-
-            for header in headers:
-
-                # File path does not need to be written
-                # back into the JSON.
-                if header == "File Path to JSON":
-                    continue
-
-                if header not in header_columns:
-                    continue
-
-                column = header_columns[header]
-
-                spreadsheet_value = worksheet.cell(
-                    row=row_number,
-                    column=column,
-                ).value
-
-                # Calculated/generated fields.
-                if header in {
-                    "Sold",
-                    "Est. Value",
-                    "Est. Value Fraction",
-                    "Est. Purchase Price",
-                    "Inventory Found",
-                    "Profit",
-                }:
-                    continue
-
-                old_value = data.get(
-                    header
-                )
-
-                if old_value != spreadsheet_value:
-
-                    data[header] = (
-                        spreadsheet_value
-                    )
-
-                    changed = True
-
-            # -------------------------------------------------
-            # Sync manually entered Invoice Price.
-            #
-            # IMPORTANT:
-            # Invoice Price is NOT necessarily part of
-            # PURCHASE_HEADERS. It is stored in the
-            # generated summary row, so this must happen
-            # independently of the headers loop above.
-            # -------------------------------------------------
-
-            if sheet_name == "Purchases":
-
-                json_invoice = normalize_invoice(
-                    data.get(
-                        "eBay ID"
-                    )
-                )
+                # ---------------------------------------------
+                # Verify the stored JSON path.
+                # ---------------------------------------------
 
                 if (
-                    json_invoice
-                    and json_invoice in invoice_prices
+                    stored_json_path
+                    and os.path.isfile(stored_json_path)
                 ):
 
-                    spreadsheet_invoice_price = (
-                        invoice_prices[
-                            json_invoice
-                        ]
+                    json_path = os.path.abspath(
+                        stored_json_path
                     )
 
-                    json_invoice_price = data.get(
-                        "Invoice Price"
+                else:
+
+                    json_path = create_new_json_path(
+                        sheet_name,
+                        row_number,
+                        worksheet,
+                        header_columns,
                     )
+
+                    print(
+                        f"JSON missing. "
+                        f"Saving new JSON to: {json_path}"
+                    )
+
+                # ---------------------------------------------
+                # Build workbook JSON data.
+                # ---------------------------------------------
+
+                workbook_data = (
+                    build_json_data_from_row(
+                        worksheet=worksheet,
+                        row_number=row_number,
+                        headers=headers,
+                        header_columns=header_columns,
+                        sheet_name=sheet_name,
+                        invoice_prices=invoice_prices,
+                    )
+                )
+
+                workbook_data["File Path to JSON"] = os.path.abspath(
+                    json_path
+                )
+
+                # ---------------------------------------------
+                # JSON DOES NOT EXIST.
+                # ---------------------------------------------
+
+                if not os.path.isfile(json_path):
+
+                    json_directory = os.path.dirname(
+                        json_path
+                    )
+
+                    if json_directory:
+                        os.makedirs(
+                            json_directory,
+                            exist_ok=True,
+                        )
 
                     try:
-                        json_invoice_price = float(
-                            json_invoice_price
+
+                        with open(
+                            json_path,
+                            "w",
+                            encoding="utf-8",
+                        ) as file:
+
+                            json.dump(
+                                workbook_data,
+                                file,
+                                indent=4,
+                                ensure_ascii=False,
+                            )
+
+                        json_cell.value = (
+                            os.path.basename(
+                                json_path
+                            )
                         )
+
+                        json_cell.hyperlink = json_path
+                        json_cell.style = "Hyperlink"
+
+                        created_count += 1
+
+                        print(
+                            f"JSON created: {json_path}"
+                        )
+
                     except (
+                        OSError,
                         TypeError,
-                        ValueError,
-                    ):
-                        json_invoice_price = None
+                    ) as error:
 
-                    if (
-                        json_invoice_price
-                        != spreadsheet_invoice_price
-                    ):
-
-                        data[
-                            "Invoice Price"
-                        ] = (
-                            spreadsheet_invoice_price
+                        print(
+                            f"Failed to create JSON: "
+                            f"{json_path}"
                         )
 
-                        changed = True
+                        print(
+                            f"  {error}"
+                        )
 
-            # -------------------------------------------------
-            # Save only if something changed.
-            # -------------------------------------------------
+                        skipped_count += 1
 
-            if changed:
+                    continue
+
+                # ---------------------------------------------
+                # JSON EXISTS.
+                # ---------------------------------------------
+
+                print(
+                    f"Comparing JSON: {json_path}"
+                )
 
                 try:
 
                     with open(
                         json_path,
-                        "w",
+                        "r",
                         encoding="utf-8",
                     ) as file:
 
-                        json.dump(
-                            data,
-                            file,
-                            indent=4,
-                            ensure_ascii=False,
-                        )
+                        existing_data = json.load(file)
 
-                    updated_count += 1
+                except (
+                    OSError,
+                    json.JSONDecodeError,
+                ) as error:
 
                     print(
-                        f"  Updated: {json_path}"
-                    )
-
-                except OSError as error:
-
-                    print(
-                        f"  Failed to write JSON: "
+                        f"Failed to read JSON: "
                         f"{json_path}"
                     )
 
                     print(
-                        f"    {error}"
+                        f"  {error}"
                     )
 
                     skipped_count += 1
+                    continue
 
-    workbook.close()
+                if not isinstance(
+                    existing_data,
+                    dict,
+                ):
 
-    print()
+                    print(
+                        f"Invalid JSON structure: "
+                        f"{json_path}"
+                    )
+
+                    skipped_count += 1
+                    continue
+
+                # ---------------------------------------------
+                # Compare workbook information to JSON.
+                # ---------------------------------------------
+
+                changed = (
+                    existing_data != workbook_data
+                )
+
+                if changed:
+
+                    try:
+
+                        with open(
+                            json_path,
+                            "w",
+                            encoding="utf-8",
+                        ) as file:
+
+                            json.dump(
+                                workbook_data,
+                                file,
+                                indent=4,
+                                ensure_ascii=False,
+                            )
+
+                        updated_count += 1
+
+                        print(
+                            f"JSON updated: {json_path}"
+                        )
+
+                    except (
+                        OSError,
+                        TypeError,
+                    ) as error:
+
+                        print(
+                            f"Failed to update JSON: "
+                            f"{json_path}"
+                        )
+
+                        print(
+                            f"  {error}"
+                        )
+
+                        skipped_count += 1
+                        continue
+
+                else:
+
+                    print(
+                        f"JSON unchanged: {json_path}"
+                    )
+
+                # ---------------------------------------------
+                # Always make sure Excel points to actual JSON.
+                # ---------------------------------------------
+
+                json_cell.value = os.path.basename(
+                    json_path
+                )
+
+                json_cell.hyperlink = json_path
+                json_cell.style = "Hyperlink"
+
+        # -----------------------------------------------------
+        # Save workbook.
+        # -----------------------------------------------------
+
+        workbook.save(
+            workbook_path
+        )
+
+    finally:
+
+        workbook.close()
+
     print(
-        "================================"
-    )
-    print(
-        "JSON SYNC COMPLETE"
-    )
-    print(
-        f"Updated: {updated_count}"
-    )
-    print(
+        f"JSON sync complete. "
+        f"Created: {created_count}, "
+        f"Updated: {updated_count}, "
         f"Skipped: {skipped_count}"
     )
-    print(
-        "================================"
-    )
-
-    return updated_count
-
+    
 # ==================================================
 # Rebuild Entire Workbook
 # ==================================================
@@ -3200,6 +3775,30 @@ def rebuild_workbook(
 
     format_overview_sheet(
         overview_sheet
+    )
+
+    format_image_hyperlinks(
+        purchases_sheet
+    )
+
+    format_image_hyperlinks(
+        sales_sheet
+    )
+
+    format_json_hyperlinks(
+        inventory_sheet
+    )
+
+    format_json_hyperlinks(
+        purchases_sheet
+    )
+
+    format_json_hyperlinks(
+        sales_sheet
+    )
+
+    format_image_hyperlinks(
+        inventory_sheet
     )
 
     # Apply special row formatting

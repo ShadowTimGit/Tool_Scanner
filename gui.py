@@ -19,7 +19,6 @@ from settings_menu.metadata_settings import MetadataSettings
 from settings_menu.tool_settings import ToolSettings
 
 from version import APP_VERSION
-import webbrowser
 from tkinter import messagebox
 
 from updater import (

@@ -9,7 +9,6 @@ from master_conversion import convert_item_master
 from config import (
     SETTINGS_FILE,
     OUTPUT_DIR,
-    LOG_DIR,
 )
 from Camera.camera import SUPPORTED_RESOLUTIONS
 
@@ -52,7 +51,6 @@ class GeneralSettings:
     def load_settings(self):
 
         self.output_dir.set(OUTPUT_DIR)
-        self.log_dir.set(LOG_DIR)
 
         if not os.path.exists(SETTINGS_FILE):
             self.camera_resolution.set(
@@ -73,13 +71,6 @@ class GeneralSettings:
                     settings.get(
                         "output_dir",
                         OUTPUT_DIR,
-                    )
-                )
-
-                self.log_dir.set(
-                    settings.get(
-                        "log_dir",
-                        LOG_DIR,
                     )
                 )
 
@@ -178,7 +169,6 @@ class GeneralSettings:
                 settings = {}
 
         settings["output_dir"] = self.output_dir.get()
-        settings["log_dir"] = self.log_dir.get()
 
         settings["crop_analyzed_images"] = (
             self.crop_analyzed_images.get()
@@ -223,16 +213,6 @@ class GeneralSettings:
             self.output_dir.set(directory)
             self.save_settings()
 
-
-    def choose_log_dir(self):
-        directory = filedialog.askdirectory(
-            title="Select Log Directory",
-            initialdir=self.log_dir.get(),
-        )
-
-        if directory:
-            self.log_dir.set(directory)
-            self.save_settings()
 
     def change_manual_capture_key(self, event=None):
         key = self.manual_capture_key.get()
@@ -380,34 +360,6 @@ class GeneralSettings:
         ).pack(
             anchor="w",
             pady=(0, 5),
-        )
-
-        log_frame = tk.Frame(
-            settings_frame,
-        )
-
-        log_frame.pack(
-            fill=tk.X,
-            pady=(0, 20),
-        )
-
-        tk.Entry(
-            log_frame,
-            textvariable=self.log_dir,
-            state="readonly",
-        ).pack(
-            side=tk.LEFT,
-            fill=tk.X,
-            expand=True,
-        )
-
-        tk.Button(
-            log_frame,
-            text="Browse...",
-            command=self.choose_log_dir,
-        ).pack(
-            side=tk.LEFT,
-            padx=(10, 0),
         )
 
         # -------------------------

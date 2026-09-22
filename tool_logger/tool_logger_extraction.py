@@ -197,11 +197,11 @@ def extract_tool_info(
     # Image path
     # ------------------------------------------------
 
-    relative_image_path = str(
+    absolute_image_path = str(
         image_path
     )
 
-    relative_json_path = str(
+    absolute_json_path = str(
         json_path
     )
     # ------------------------------------------------
@@ -226,6 +226,6 @@ def extract_tool_info(
         "Profit": profit,
         "Date": image_date,
         "Inventory Type": inventory_type,
-        "File Path to Image": relative_image_path,
-        "File Path to JSON": relative_json_path,
+        "File Path to Image": absolute_image_path,
+        "File Path to JSON": absolute_json_path,
     }

@@ -4,7 +4,6 @@ import json
 from config import (
     OUTPUT_DIR,
     SETTINGS_FILE,
-    LOG_DIR,
 )
 
 
@@ -34,13 +33,15 @@ def get_output_dir():
         return OUTPUT_DIR
     
 INPUT_ROOT = get_output_dir()
-LOG_ROOT = LOG_DIR
+LOG_ROOT = os.path.join(
+    get_output_dir(),
+    "Logs",
+)
 
 BRANDS_FILE = os.path.join(
     "settings",
     "brands.json",
 )
-
 
 # ==================================================
 # Default Brands

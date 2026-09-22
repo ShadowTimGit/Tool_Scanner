@@ -784,17 +784,28 @@ class CameraProcessor:
             f"{crop_number:03d}_Unlogged.json"
         )
 
+        json_filename2 = (
+            f"{self.tool}_{self.brand}_"
+            f"{crop_number:03d}_Logged.json"
+        )
+
+
         json_filepath = os.path.join(
             output_dir,
             json_filename,
+        )
+
+        json_filepath2 = os.path.join(
+            output_dir,
+            json_filename2,
         )
 
         absolute_image_path = os.path.abspath(
             filepath,
         )
 
-        absolute_json_path = os.path.abspath(
-            json_filepath,
+        absolute_json2_path = os.path.abspath(
+            json_filepath2,
         )
 
         metadata = {
@@ -816,7 +827,7 @@ class CameraProcessor:
             "Date": today.strftime("%Y-%m-%d"),
             "Inventory Type": self.inventory_type,
             "File Path to Image": absolute_image_path,
-            "File Path to JSON": absolute_json_path,
+            "File Path to JSON": absolute_json2_path,
         }
 
         try:
