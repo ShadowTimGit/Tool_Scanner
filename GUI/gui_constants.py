@@ -9,5 +9,5 @@ TRIGGER_MANUAL = "Manual"
 TRIGGER_AUTOMATIC = "Automatic"
 TRIGGER_CONTINUOUS = "Continuous Counting"
 
-INVENTORY_PURCHASE = "purchase"
-INVENTORY_SALE = "sale"
+INVENTORY_PURCHASE = "Purchases"
+INVENTORY_SALE = "Sales"
