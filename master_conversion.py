@@ -53,7 +53,7 @@ SALE_OUTPUT_DIR_NAME = "Sales"
 
 # Generated sale invoice format:
 # SALE-20260826-000001
-SALE_INVOICE_PREFIX = "SALE"
+SALE_INVOICE_PREFIX = "S"
 
 # Existing image paths are not available in the
 # old Item Master, so this stays blank.

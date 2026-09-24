@@ -664,10 +664,10 @@ def format_purchases_sheet(
     column_widths = {
         1: med_col,
         2: med_col,
-        3: med_col,
+        3: large_col,
         4: med_col,
         5: med_col,
-        6: med_col,
+        6: large_col,
         7: med_col,
         8: med_col,
         9: small_col,
@@ -843,8 +843,8 @@ def format_sales_sheet(
 
     column_widths = {
         1: med_col,
-        2: med_col,
-        3: med_col,
+        2: average_col,
+        3: large_col,
         4: med_col,
         5: med_col,
         6: med_col,
@@ -929,7 +929,7 @@ def format_inventory_sheet(
         1: med_col,
         2: med_col,
         3: med_col,
-        4: med_col,
+        4: large_col,
         5: med_col,
         6: med_col,
         7: small_col,

@@ -1195,14 +1195,14 @@ def save_to_spreadsheet(
 
     inventory_type = row_data.get(
         "Inventory Type",
-        "purchase",
+        "Purchases",
     )
 
     inventory_type = str(
         inventory_type
     ).strip().lower()
 
-    if inventory_type == "sale":
+    if inventory_type == "sales":
 
         worksheet = workbook[
             "Sales"
@@ -1240,7 +1240,7 @@ def save_to_spreadsheet(
         ]
     )
 
-    if inventory_type != "sale":
+    if inventory_type != "sales":
 
         invoice = normalize_invoice(
             row_data.get(
@@ -1763,7 +1763,7 @@ def build_json_data_from_row(
     invoice_prices,
 ):
     """
-    Build the JSON representation of one workbook row.
+    Build JSON in the same format as manually captured tool JSON.
     """
 
     excluded_headers = {
@@ -1778,6 +1778,7 @@ def build_json_data_from_row(
 
     data = {}
 
+    # Preserve the workbook/header order.
     for header in headers:
 
         if header in excluded_headers:
@@ -1798,22 +1799,56 @@ def build_json_data_from_row(
         else:
             data[header] = json_safe_value(value)
 
+    # ---------------------------------------------------------
+    # Normalize missing image path.
+    # ---------------------------------------------------------
+
+    image_path = data.get("File Path to Image")
+
+    if image_path is None or not str(image_path).strip():
+        data["File Path to Image"] = "None"
+
+    # ---------------------------------------------------------
+    # Purchase JSON
+    # ---------------------------------------------------------
+
     if sheet_name == "Purchases":
 
-        data["Inventory Type"] = "purchase"
+        data["Inventory Type"] = "Purchases"
 
-        invoice = normalize_invoice(
+        ebay_id = normalize_invoice(
             data.get("eBay ID")
         )
 
-        if invoice and invoice in invoice_prices:
+        if ebay_id and ebay_id in invoice_prices:
             data["Invoice Price"] = json_safe_value(
-                invoice_prices[invoice]
+                invoice_prices[ebay_id]
             )
+
+    # ---------------------------------------------------------
+    # Sale JSON
+    # ---------------------------------------------------------
 
     elif sheet_name == "Sales":
 
-        data["Inventory Type"] = "sale"
+        data["Inventory Type"] = "Sales"
+
+        # Make sure Invoice Price comes directly from
+        # the sale row and is not accidentally omitted.
+        if "Invoice Price" not in data:
+            invoice_price_column = header_columns.get(
+                "Invoice Price"
+            )
+
+            if invoice_price_column is not None:
+                invoice_price = worksheet.cell(
+                    row=row_number,
+                    column=invoice_price_column,
+                ).value
+
+                data["Invoice Price"] = json_safe_value(
+                    invoice_price
+                )
 
     return data
 
@@ -2763,11 +2798,11 @@ def rebuild_workbook_from_json():
             inventory_type = str(
                 row.get(
                     "Inventory Type",
-                    "purchase",
+                    "Purchases",
                 )
             ).strip().casefold()
 
-            if inventory_type == "sale":
+            if inventory_type == "sales":
                 sales.append(row)
 
             else:

@@ -26,7 +26,6 @@ class ToolsMixin:
             invoice=self.invoice_var.get(),
             ebay_id=self.ebay_id_var.get(),
             part_number=self.part_number_var.get(),
-            #estimated_value=self.estimated_value_var.get(),
             invoice_price=self.invoice_price_var.get(),
         )
 

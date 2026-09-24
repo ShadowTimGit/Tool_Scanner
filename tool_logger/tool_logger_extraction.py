@@ -86,7 +86,7 @@ def extract_tool_info(
 
     inventory_type = data.get(
         "Inventory Type",
-        "purchase",
+        "Purchases",
     )
 
     # ------------------------------------------------
@@ -97,7 +97,7 @@ def extract_tool_info(
         inventory_type,
         str,
     ):
-        inventory_type = "purchase"
+        inventory_type = "Purchases"
 
     inventory_type = (
         inventory_type
@@ -106,10 +106,10 @@ def extract_tool_info(
     )
 
     if inventory_type not in (
-        "purchase",
-        "sale",
+        "purchases",
+        "sales",
     ):
-        inventory_type = "purchase"
+        inventory_type = "purchases"
 
     # ------------------------------------------------
     # Validate required fields

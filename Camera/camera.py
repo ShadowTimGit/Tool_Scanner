@@ -820,10 +820,7 @@ class CameraProcessor:
             "Invoice": self.invoice,
             "eBay ID": self.ebay_id,
             "Part Number": self.part_number,            
-            "Estimated Value": self.estimated_value,
-            "Number Sold": len(objects),
             "Invoice Price": self.invoice_price,
-            "Profit": self.profit,
             "Date": today.strftime("%Y-%m-%d"),
             "Inventory Type": self.inventory_type,
             "File Path to Image": absolute_image_path,
@@ -1452,11 +1449,8 @@ class CameraProcessor:
         output_dir = os.path.join(
             self.output_dir,
             self.inventory_type,
-            self.tool,
             self.brand,
-            year,
-            month,
-            day,
+            self.tool,
         )
 
         os.makedirs(
@@ -1470,7 +1464,7 @@ class CameraProcessor:
             return None
 
         filename = (
-            f"{self.tool}_{self.brand}_"
+            f"{self.invoice}_{self.tool}_{self.brand}_"
             f"{crop_number:03d}_Unlogged.jpg"
         )
 

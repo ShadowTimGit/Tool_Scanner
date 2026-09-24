@@ -89,14 +89,14 @@ DEFAULT_OTHER = [
 DEFAULT_SIZE = "1/4"
 
 DEFAULT_SPECIALTY_SOCKET = [
-    "N/A",
-    "No",
-    "Yes",
+    "NA",
+    "N",
+    "Y",
 ]
 
 
 DEFAULT_DRIVE = [
-    "N/A",
+    "NA",
     "1/4\"",
     "3/8\"",
     "1/2\"",
@@ -108,7 +108,7 @@ DEFAULT_DRIVE = [
 
 
 DEFAULT_POINT = [
-    "N/A",
+    "NA",
     "6 Point",
     "8 Point",
     "10 Point",
