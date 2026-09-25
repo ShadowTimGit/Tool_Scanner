@@ -41,7 +41,8 @@ DEFAULT_CAMERA_HEIGHT = 30
 CONFIDENCE = 0.50
 
 # Model to start with
-MODEL = "yolo11s.pt"
+# Use the lighter nano model by default to reduce CPU load in live detection.
+MODEL = "yolo11n.pt"
 
 # ==================================================
 # Default Scan Dot Settings

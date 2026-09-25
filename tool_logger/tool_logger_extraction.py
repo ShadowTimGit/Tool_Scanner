@@ -1,4 +1,20 @@
+import os
 from datetime import datetime
+
+
+def _normalize_path(value):
+    if value is None:
+        return value
+
+    value = str(value).strip()
+
+    if not value or value.lower() == "none":
+        return value
+
+    if os.path.isabs(value):
+        return value
+
+    return os.path.abspath(value)
 
 
 # ==================================================
@@ -197,11 +213,11 @@ def extract_tool_info(
     # Image path
     # ------------------------------------------------
 
-    absolute_image_path = str(
+    absolute_image_path = _normalize_path(
         image_path
     )
 
-    absolute_json_path = str(
+    absolute_json_path = _normalize_path(
         json_path
     )
     # ------------------------------------------------

@@ -79,6 +79,45 @@ def load_invoice_prices(
 # JSON Path Helpers
 # =========================================================
 
+def get_cell_path_value(
+    cell,
+):
+    """
+    Return the real stored path for a hyperlink cell.
+
+    Excel often displays only the filename while the hyperlink
+    target contains the absolute path we need to persist.
+    """
+
+    if cell is None:
+        return ""
+
+    hyperlink = getattr(
+        cell,
+        "hyperlink",
+        None,
+    )
+
+    if hyperlink:
+        target = getattr(
+            hyperlink,
+            "target",
+            None,
+        )
+
+        if target:
+            return str(
+                target
+            ).strip()
+
+    if cell.value is not None:
+        return str(
+            cell.value
+        ).strip()
+
+    return ""
+
+
 def get_json_path_from_cell(
     cell,
 ):
@@ -89,22 +128,7 @@ def get_json_path_from_cell(
     may only contain the filename.
     """
 
-    if cell.hyperlink:
-
-        target = cell.hyperlink.target
-
-        if target:
-            return str(
-                target
-            ).strip()
-
-    if cell.value:
-
-        return str(
-            cell.value
-        ).strip()
-
-    return ""
+    return get_cell_path_value(cell)
 
 
 def normalize_json_path(
@@ -257,6 +281,58 @@ def resolve_existing_json_path(
     )
 
 
+def resolve_existing_image_path(
+    stored_image_path,
+):
+    """
+    Resolve an existing image path using the same logic as JSON:
+
+    1. prefer the hyperlink target
+    2. accept absolute paths
+    3. resolve relative paths against the current working dir
+    4. resolve relative paths against INPUT_ROOT
+    5. fall back to filename search in INPUT_ROOT
+    """
+
+    if not stored_image_path:
+        return ""
+
+    candidate = str(stored_image_path).strip()
+
+    if not candidate or candidate.lower() == "none":
+        return ""
+
+    if os.path.isabs(candidate):
+        path = os.path.abspath(os.path.normpath(candidate))
+        return path if os.path.exists(path) else ""
+
+    current_directory_path = os.path.abspath(
+        os.path.normpath(candidate)
+    )
+    if os.path.exists(current_directory_path):
+        return current_directory_path
+
+    input_root_path = os.path.abspath(
+        os.path.join(
+            INPUT_ROOT,
+            candidate,
+        )
+    )
+    if os.path.exists(input_root_path):
+        return input_root_path
+
+    for root, _, files in os.walk(INPUT_ROOT):
+        if os.path.basename(candidate) in files:
+            return os.path.abspath(
+                os.path.join(
+                    root,
+                    os.path.basename(candidate),
+                )
+            )
+
+    return ""
+
+
 # =========================================================
 # JSON Value Helpers
 # =========================================================
@@ -352,10 +428,22 @@ def build_json_data_from_row(
             header
         ]
 
-        value = worksheet.cell(
+        cell = worksheet.cell(
             row=row_number,
             column=column,
-        ).value
+        )
+
+        value = cell.value
+
+        if header == "File Path to Image":
+            target_value = get_cell_path_value(cell)
+            if target_value:
+                resolved_target = resolve_existing_image_path(
+                    target_value
+                )
+                value = resolved_target or target_value
+            else:
+                value = ""
 
         if header == "Invoice #":
 
@@ -377,12 +465,16 @@ def build_json_data_from_row(
         "File Path to Image"
     )
 
-    if (
-        image_path is None
-        or not str(image_path).strip()
-    ):
-
+    if image_path is None or not str(image_path).strip():
         data["File Path to Image"] = "None"
+    else:
+        resolved_image_path = resolve_existing_image_path(
+            image_path
+        )
+        if resolved_image_path:
+            data["File Path to Image"] = resolved_image_path
+        else:
+            data["File Path to Image"] = str(image_path).strip()
 
     # -----------------------------------------------------
     # Purchase JSON.
@@ -711,21 +803,13 @@ def sync_json_from_workbook():
             # Process workbook rows.
             # -------------------------------------------------
 
-            for row_number in range(
-                2,
-                worksheet.max_row + 1,
+            for row_number, row_values in enumerate(
+                worksheet.iter_rows(
+                    min_row=2,
+                    values_only=True,
+                ),
+                start=2,
             ):
-
-                row_values = [
-                    worksheet.cell(
-                        row=row_number,
-                        column=column,
-                    ).value
-                    for column in range(
-                        1,
-                        worksheet.max_column + 1,
-                    )
-                ]
 
                 # -------------------------------------------------
                 # Skip empty rows.
@@ -787,6 +871,16 @@ def sync_json_from_workbook():
                         json_cell
                     )
                 )
+
+                if not stored_json_path and json_column <= len(row_values):
+                    json_cell_value = row_values[
+                        json_column - 1
+                    ]
+
+                    if json_cell_value is not None:
+                        stored_json_path = str(
+                            json_cell_value
+                        ).strip()
 
                 # -------------------------------------------------
                 # Resolve existing JSON.
@@ -857,9 +951,7 @@ def sync_json_from_workbook():
 
                 workbook_data[
                     "File Path to JSON"
-                ] = os.path.abspath(
-                    json_path
-                )
+                ] = json_path
 
                 # -------------------------------------------------
                 # JSON DOES NOT EXIST.

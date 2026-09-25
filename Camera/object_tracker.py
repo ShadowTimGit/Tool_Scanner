@@ -1,6 +1,10 @@
+import os
+
+import torch
 from ultralytics import YOLO
 
 from config import MODEL
+from performance_debug import time_block
 
 
 # ==================================================
@@ -20,6 +24,23 @@ TRACKER_CONFIG = "Camera/bytetrack_tools.yaml"
 MAX_MISSED_FRAMES = 6
 
 
+def get_model_device():
+    requested = os.getenv("TOOL_SCANNER_DEVICE", "").strip().lower()
+
+    if requested:
+        if requested in {"cpu", "cuda", "mps"}:
+            return requested
+        return "cuda" if torch.cuda.is_available() else "cpu"
+
+    if torch.cuda.is_available():
+        return "cuda"
+
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps"
+
+    return "cpu"
+
+
 class ObjectTracker:
 
     def __init__(self):
@@ -28,7 +49,11 @@ class ObjectTracker:
         # YOLO model
         # -------------------------
 
+        self.device = get_model_device()
+        print(f"[ToolScanner] YOLO device: {self.device}")
+        print(f"[ToolScanner] YOLO model: {MODEL}")
         self.model = YOLO(MODEL)
+        self.model.to(self.device)
 
         # -------------------------
         # Tracked objects
@@ -46,15 +71,21 @@ class ObjectTracker:
         frame,
     ):
 
-        results = self.model.track(
-            frame,
-            conf=CONFIDENCE,
-            tracker=TRACKER_CONFIG,
-            persist=True,
-            verbose=False,
-        )
+        with time_block(
+            "tracker.detect.model_track",
+            frame_shape=frame.shape[:2],
+        ):
+            results = self.model.track(
+                frame,
+                conf=CONFIDENCE,
+                tracker=TRACKER_CONFIG,
+                persist=True,
+                verbose=False,
+                device=self.device,
+            )
 
         detections = []
+        model_names = self.model.names
 
         for result in results:
 
@@ -116,7 +147,7 @@ class ObjectTracker:
                     .item()
                 )
 
-                class_name = self.model.names[
+                class_name = model_names[
                     class_id
                 ]
 
@@ -312,3 +343,4 @@ class ObjectTracker:
 
         # Reset YOLO / ByteTrack tracker
         self.model = YOLO(MODEL)
+        self.model.to(self.device)

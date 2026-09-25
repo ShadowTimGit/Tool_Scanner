@@ -2,6 +2,8 @@
 
 from concurrent.futures import ProcessPoolExecutor
 
+from performance_debug import time_block
+
 LOGGER_EXECUTOR = None
 
 
@@ -50,19 +52,22 @@ def rebuild_logger():
 
 
 def submit_json(json_filepath):
-    executor = get_logger_executor()
+    with time_block(
+        "logger.submit_json",
+        json_path=json_filepath,
+    ):
+        executor = get_logger_executor()
 
-    try:
-        executor.submit(
-            log_json_file,
-            json_filepath,
-        )
-
-    except Exception as error:
-        print(
-            f"ERROR: Could not submit logger job: "
-            f"{error}"
-        )
+        try:
+            executor.submit(
+                log_json_file,
+                json_filepath,
+            )
+        except Exception as error:
+            print(
+                f"ERROR: Could not submit logger job: "
+                f"{error}"
+            )
 
 
 def submit_rebuild():

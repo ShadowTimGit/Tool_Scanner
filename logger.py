@@ -2,6 +2,7 @@ import json
 import os
 import sys
 
+from performance_debug import print_perf_summary, time_block
 from tool_logger.tool_logger_config import INPUT_ROOT
 from tool_logger.tool_logger_extraction import extract_tool_info
 from tool_logger.workbook import save_to_spreadsheet
@@ -16,54 +17,87 @@ from tool_logger.tool_logger_spreadsheets import rebuild_workbook_from_json
 def process_json_file(
     json_path,
 ):
-    print(
-        f"Processing: {json_path}"
-    )
+    with time_block(
+        "logger.process_json_file",
+        json_path=os.path.basename(json_path),
+    ):
+        print(
+            f"Processing: {json_path}"
+        )
 
-    if not os.path.exists(json_path):
-        alternate_path = json_path.replace(
-            "_Logged.json",
+        if not os.path.exists(json_path):
+            alternate_path = json_path.replace(
+                "_Logged.json",
+                "_Unlogged.json",
+            )
+
+            if os.path.exists(alternate_path):
+                json_path = alternate_path
+
+        with time_block(
+            "logger.json_load",
+            json_path=os.path.basename(json_path),
+        ):
+            with open(
+                json_path,
+                "r",
+                encoding="utf-8",
+            ) as file:
+                data = json.load(file)
+
+        relative_path_updated = False
+
+        for key in ("File Path to Image", "File Path to JSON"):
+            if isinstance(data, dict) and data.get(key):
+                path_value = str(data[key]).strip()
+                if path_value and not os.path.isabs(path_value):
+                    data[key] = os.path.abspath(path_value)
+                    relative_path_updated = True
+
+        if relative_path_updated:
+            with open(
+                json_path,
+                "w",
+                encoding="utf-8",
+            ) as file:
+                json.dump(data, file, indent=4, ensure_ascii=False)
+
+        with time_block(
+            "logger.extract_tool_info",
+            record_size=len(data) if isinstance(data, dict) else 0,
+        ):
+            row_data = extract_tool_info(
+                data,
+            )
+
+        logged_path = json_path.replace(
             "_Unlogged.json",
+            "_Logged.json",
         )
 
-        if os.path.exists(alternate_path):
-            json_path = alternate_path
+        if logged_path != json_path:
+            os.rename(
+                json_path,
+                logged_path,
+            )
 
-    with open(
-        json_path,
-        "r",
-        encoding="utf-8",
-    ) as file:
-        data = json.load(file)
+            json_path = logged_path
 
-    row_data = extract_tool_info(
-        data,
-    )
+        row_data["File Path to JSON"] = json_path
 
-    logged_path = json_path.replace(
-        "_Unlogged.json",
-        "_Logged.json",
-    )
+        with time_block(
+            "logger.save_to_spreadsheet",
+            records=1 if row_data else 0,
+        ):
+            log_path = save_to_spreadsheet(
+                row_data
+            )
 
-    if logged_path != json_path:
-        os.rename(
-            json_path,
-            logged_path,
+        print(
+            f"  Logged: {log_path}"
         )
 
-        json_path = logged_path
-
-    row_data["File Path to JSON"] = json_path
-
-    log_path = save_to_spreadsheet(
-        row_data
-    )
-
-    print(
-        f"  Logged: {log_path}"
-    )
-
-    return True
+        return True
 
 
 # ==================================================
@@ -184,3 +218,5 @@ if __name__ == "__main__":
 
     else:
         process_directory()
+
+    print_perf_summary()

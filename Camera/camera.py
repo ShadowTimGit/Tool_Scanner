@@ -1,7 +1,9 @@
 import cv2
-import os
 import json
+import os
+import time
 
+from performance_debug import time_block
 from tool_logger.logger_worker import submit_json
 
 from datetime import datetime
@@ -20,6 +22,7 @@ from Camera.camera_settings import (
 
 from Camera.object_tracker import (
     ObjectTracker,
+    MAX_MISSED_FRAMES,
     MIN_FRAMES,
 )
 
@@ -177,6 +180,17 @@ class CameraProcessor:
 
         self.crop_number = 1
         self.last_capture_time = 0
+        self.last_detection_time = 0.0
+        self.recent_session_crops = []
+        self.detection_interval = max(
+            0.05,
+            float(
+                os.getenv(
+                    "TOOL_SCANNER_DETECTION_INTERVAL",
+                    "0.25",
+                )
+            ),
+        )
 
         self.trigger_mode = TRIGGER_AUTOMATIC
         self.crop_mode = CROP_MODE_PREVIEW
@@ -711,6 +725,32 @@ class CameraProcessor:
 
         return None
 
+    def save_manual_snapshot(self, frame):
+        if frame is None:
+            return None
+
+        output_dir = os.path.join(
+            get_output_dir(),
+            "Manual_Captures",
+        )
+        os.makedirs(output_dir, exist_ok=True)
+
+        timestamp = datetime.now().strftime(
+            "%Y%m%d_%H%M%S_%f"
+        )
+
+        filename = f"ManualCapture_{timestamp}.jpg"
+        filepath = os.path.join(
+            output_dir,
+            filename,
+        )
+
+        if not cv2.imwrite(filepath, frame):
+            return None
+
+        print(f"Saved manual snapshot: {filepath}")
+        return filepath
+
     # ==================================================
     # Capture Current Counting Area
     # ==================================================
@@ -740,7 +780,9 @@ class CameraProcessor:
         year = today.strftime("%Y")
         month = today.strftime("%m")
         day = today.strftime("%d")
-        self.output_dir = get_output_dir()
+        self.output_dir = os.path.abspath(
+            get_output_dir()
+        )
 
         output_dir = os.path.join(
             self.output_dir,
@@ -819,13 +861,31 @@ class CameraProcessor:
             "Specialty Socket": self.specialty_socket,
             "Invoice": self.invoice,
             "eBay ID": self.ebay_id,
-            "Part Number": self.part_number,            
+            "Part Number": self.part_number,
             "Invoice Price": self.invoice_price,
             "Date": today.strftime("%Y-%m-%d"),
             "Inventory Type": self.inventory_type,
             "File Path to Image": absolute_image_path,
             "File Path to JSON": absolute_json2_path,
         }
+
+        session_entry = {
+            "json_path": absolute_json2_path,
+            "image_path": absolute_image_path,
+            "tool_name": self.tool,
+            "brand_name": self.brand,
+            "display_name": f"{self.tool} / {self.brand}",
+        }
+
+        self.recent_session_crops.insert(
+            0,
+            session_entry,
+        )
+
+        if len(self.recent_session_crops) > 25:
+            self.recent_session_crops = (
+                self.recent_session_crops[:25]
+            )
 
         try:
 
@@ -882,389 +942,444 @@ class CameraProcessor:
         frame,
     ):
 
-        self.box_manager.initialize(frame)
+        with time_block(
+            "camera.process_frame",
+            trigger_mode=self.trigger_mode,
+            frame_shape=frame.shape[:2],
+        ):
+            self.box_manager.initialize(frame)
 
-        original_frame = frame.copy()
+            original_frame = frame.copy()
 
-        detections = self.tracker.detect(frame)
-
-        objects = self.tracker.update(
-            detections
-        )
-
-        current_time = (
-            cv2.getTickCount()
-            / cv2.getTickFrequency()
-        )
-
-        objects_inside = set()
-
-        # --------------------------------------------------
-        # Process tracked objects
-        # --------------------------------------------------
-
-        for object_id, obj in objects.items():
-
-            x = obj["x"]
-            y = obj["y"]
-            w = obj["w"]
-            h = obj["h"]
-
-            object_box = [
-                x,
-                y,
-                x + w,
-                y + h,
-            ]
-
-            center_inside = (
-                self.object_center_inside_counting_box(
-                    object_box
-                )
+            now = time.monotonic()
+            should_detect = (
+                now - self.last_detection_time
+                >= self.detection_interval
+                or not self.tracker.objects
             )
 
-            if center_inside:
-                objects_inside.add(object_id)
-
-            # --------------------------------------------------
-            # Draw object
-            # --------------------------------------------------
-
-            if obj["frames"] >= MIN_FRAMES:
-
-                cv2.rectangle(
-                    frame,
-                    (x, y),
-                    (x + w, y + h),
-                    (0, 255, 0),
-                    2,
-                )
-
-                center_x = x + (w // 2)
-                center_y = y + (h // 2)
-
-                cv2.circle(
-                    frame,
-                    (center_x, center_y),
-                    5,
-                    (0, 0, 255),
-                    -1,
-                )
-
-                cv2.putText(
-                    frame,
-                    f"ID: {object_id}",
-                    (
-                        x,
-                        max(y - 25, 20),
-                    ),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 255, 0),
-                    2,
-                )
-
-                cv2.putText(
-                    frame,
-                    f"Frames: {obj['frames']}",
-                    (
-                        x,
-                        max(y - 5, 40),
-                    ),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (255, 255, 0),
-                    1,
-                )
-
-            # --------------------------------------------------
-            # Automatic capture
-            #
-            # Only capture when:
-            # - automatic mode is active
-            # - object has enough tracking frames
-            # - object center is inside counting box
-            # - red scan condition is satisfied
-            # - object has not already been processed
-            # - capture interval has elapsed
-            # --------------------------------------------------
-
-            if self.require_red_for_automatic:
-
-                red_detected = (
-                    self.has_red_in_scan_area(
-                        original_frame
-                    )
-                )
-
+            if should_detect:
+                with time_block(
+                    "camera.detect",
+                    trigger_mode=self.trigger_mode,
+                ):
+                    detections = self.tracker.detect(frame)
+                self.last_detection_time = now
             else:
+                detections = []
 
-                red_detected = True
+            with time_block(
+                "camera.update_objects",
+                detection_count=len(detections),
+            ):
+                objects = self.tracker.update(
+                    detections
+                )
 
+            current_time = (
+                cv2.getTickCount()
+                / cv2.getTickFrequency()
+            )
+
+            red_detected = True
             if (
                 self.trigger_mode == TRIGGER_AUTOMATIC
-                and obj["frames"] >= MIN_FRAMES
-                and center_inside
-                and red_detected
-                and object_id not in self.processed_object_ids
+                and self.require_red_for_automatic
+                and self.scan_box is not None
             ):
+                with time_block(
+                    "camera.red_scan",
+                    scan_box=self.scan_box,
+                    area_size=(original_frame.shape[0], original_frame.shape[1]),
+                ):
+                    red_detected = self.has_red_in_scan_area(original_frame)
 
-                time_since_capture = (
-                    current_time
-                    - self.last_capture_time
-                )
-
-                if time_since_capture >= CAPTURE_INTERVAL:
-                    if self.metadata_sync_callback:
-                        self.metadata_sync_callback()
-
-                    saved_filename = (
-                        self.capture_counting_area(
-                            original_frame,
-                            objects,
-                            object_id,
-                        )
-                    )
-
-                    if saved_filename:
-
-                        self.processed_object_ids.add(
-                            object_id
-                        )
-
-                        obj["captured"] = True
+            objects_inside = set()
 
             # --------------------------------------------------
-            # Continuous counting
-            #
-            # Count an object exactly once when its center
-            # enters the counting box.
+            # Process tracked objects
             # --------------------------------------------------
-
-            elif (
-                self.trigger_mode == TRIGGER_CONTINUOUS
-                and obj["frames"] >= MIN_FRAMES
-                and center_inside
-                and object_id not in self.processed_object_ids
-            ):
-
-                self.processed_object_ids.add(
-                    object_id
-                )
-
-                self.continuous_count += 1
-
-        # --------------------------------------------------
-        # Manual capture
-        #
-        # Counts/captures every object whose center is
-        # currently inside the counting box.
-        # --------------------------------------------------
-
-        if (
-            self.trigger_mode == TRIGGER_MANUAL
-            and self.manual_trigger_requested
-        ):
-
-            self.manual_trigger_requested = False
-
-            manual_objects = {}
 
             for object_id, obj in objects.items():
 
-                if obj["frames"] < MIN_FRAMES:
-                    continue
+                x = obj["x"]
+                y = obj["y"]
+                w = obj["w"]
+                h = obj["h"]
 
-                box = [
-                    obj["x"],
-                    obj["y"],
-                    obj["x"] + obj["w"],
-                    obj["y"] + obj["h"],
+                object_box = [
+                    x,
+                    y,
+                    x + w,
+                    y + h,
                 ]
 
-                if (
-                    not self.show_counting_box
-                    or self.object_center_inside_counting_box(box)
-                ):
-                    manual_objects[object_id] = obj
-
-            if manual_objects:
-
-                if self.metadata_sync_callback:
-                    self.metadata_sync_callback()
-
-                saved_filename = (
-                    self.capture_counting_area(
-                        original_frame,
-                        manual_objects,
+                center_inside = (
+                    self.object_center_inside_counting_box(
+                        object_box
                     )
                 )
 
-                if saved_filename:
+                if center_inside:
+                    objects_inside.add(object_id)
 
-                    for object_id in manual_objects:
+                # --------------------------------------------------
+                # Draw object
+                #
+                # Keep the visual overlay active as soon as an object is
+                # tracked, even before it reaches MIN_FRAMES. The capture
+                # and counting rules still use MIN_FRAMES, but the user
+                # should see the box immediately while the tracker is
+                # actively following it.
+                # --------------------------------------------------
 
-                        manual_objects[
-                            object_id
-                        ]["captured"] = True
+                if (
+                    obj["frames"] >= MIN_FRAMES
+                    or obj.get("missed_frames", 0)
+                    <= MAX_MISSED_FRAMES
+                ):
 
-        # --------------------------------------------------
-        # Reset processed IDs after objects leave the
-        # counting box.
-        #
-        # This allows an object to be processed again only
-        # after it has actually left and then re-entered.
-        # --------------------------------------------------
+                    cv2.rectangle(
+                        frame,
+                        (x, y),
+                        (x + w, y + h),
+                        (0, 255, 0),
+                        2,
+                    )
 
-        objects_that_left = (
-            self.counting_object_ids
-            - objects_inside
-        )
+                    center_x = x + (w // 2)
+                    center_y = y + (h // 2)
 
-        self.processed_object_ids.difference_update(
-            objects_that_left
-        )
+                    cv2.circle(
+                        frame,
+                        (center_x, center_y),
+                        5,
+                        (0, 0, 255),
+                        -1,
+                    )
 
-        self.counting_object_ids = objects_inside
+                    cv2.putText(
+                        frame,
+                        f"ID: {object_id}",
+                        (
+                            x,
+                            max(y - 25, 20),
+                        ),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (0, 255, 0),
+                        2,
+                    )
 
-        # --------------------------------------------------
-        # Detection count
-        # --------------------------------------------------
+                    label = (
+                        "Frames: {}".format(obj["frames"])
+                        if obj["frames"] >= MIN_FRAMES
+                        else "Tracking"
+                    )
 
-        cv2.putText(
-            frame,
-            f"Objects: {len(detections)}",
-            (20, 30),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (0, 255, 255),
-            2,
-        )
+                    cv2.putText(
+                        frame,
+                        label,
+                        (
+                            x,
+                            max(y - 5, 40),
+                        ),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (255, 255, 0),
+                        1,
+                    )
 
-        if self.trigger_mode == TRIGGER_CONTINUOUS:
+                # --------------------------------------------------
+                # Automatic capture
+                #
+                # Only capture when:
+                # - automatic mode is active
+                # - object has enough tracking frames
+                # - object center is inside counting box
+                # - red scan condition is satisfied
+                # - object has not already been processed
+                # - capture interval has elapsed
+                # --------------------------------------------------
+
+                if (
+                    self.trigger_mode == TRIGGER_AUTOMATIC
+                    and obj["frames"] >= MIN_FRAMES
+                    and center_inside
+                    and red_detected
+                    and object_id not in self.processed_object_ids
+                ):
+
+                    time_since_capture = (
+                        current_time
+                        - self.last_capture_time
+                    )
+
+                    if time_since_capture >= CAPTURE_INTERVAL:
+                        if self.metadata_sync_callback:
+                            self.metadata_sync_callback()
+
+                        with time_block(
+                            "camera.capture_counting_area",
+                            object_id=object_id,
+                            object_count=len(objects),
+                        ):
+                            saved_filename = (
+                                self.capture_counting_area(
+                                    original_frame,
+                                    objects,
+                                    object_id,
+                                )
+                            )
+
+                        if saved_filename:
+
+                            self.processed_object_ids.add(
+                                object_id
+                            )
+
+                            obj["captured"] = True
+
+                # --------------------------------------------------
+                # Continuous counting
+                #
+                # Count an object exactly once when its center
+                # enters the counting box.
+                # --------------------------------------------------
+
+                elif (
+                    self.trigger_mode == TRIGGER_CONTINUOUS
+                    and obj["frames"] >= MIN_FRAMES
+                    and center_inside
+                    and object_id not in self.processed_object_ids
+                ):
+
+                    self.processed_object_ids.add(
+                        object_id
+                    )
+
+                    self.continuous_count += 1
+
+            # --------------------------------------------------
+            # Manual capture
+            #
+            # Counts/captures every object whose center is
+            # currently inside the counting box.
+            # --------------------------------------------------
+
+            if self.manual_trigger_requested:
+
+                self.manual_trigger_requested = False
+
+                manual_objects = {}
+
+                for object_id, obj in objects.items():
+
+                    if obj["frames"] < MIN_FRAMES:
+                        continue
+
+                    box = [
+                        obj["x"],
+                        obj["y"],
+                        obj["x"] + obj["w"],
+                        obj["y"] + obj["h"],
+                    ]
+
+                    if (
+                        not self.show_counting_box
+                        or self.object_center_inside_counting_box(box)
+                    ):
+                        manual_objects[object_id] = obj
+
+                if manual_objects:
+
+                    if self.metadata_sync_callback:
+                        self.metadata_sync_callback()
+
+                    with time_block(
+                        "camera.capture_manual",
+                        object_count=len(manual_objects),
+                    ):
+                        saved_filename = (
+                            self.capture_counting_area(
+                                original_frame,
+                                manual_objects,
+                            )
+                        )
+
+                    if saved_filename:
+
+                        for object_id in manual_objects:
+
+                            manual_objects[
+                                object_id
+                            ]["captured"] = True
+
+                else:
+                    saved_filename = self.save_manual_snapshot(
+                        original_frame
+                    )
+
+                    if saved_filename and self.metadata_sync_callback:
+                        self.metadata_sync_callback()
+
+            # --------------------------------------------------
+            # Reset processed IDs after objects leave the
+            # counting box.
+            #
+            # This allows an object to be processed again only
+            # after it has actually left and then re-entered.
+            # --------------------------------------------------
+
+            objects_that_left = (
+                self.counting_object_ids
+                - objects_inside
+            )
+
+            self.processed_object_ids.difference_update(
+                objects_that_left
+            )
+
+            self.counting_object_ids = objects_inside
+
+            # --------------------------------------------------
+            # Detection count
+            # --------------------------------------------------
 
             cv2.putText(
                 frame,
-                f"Count: {self.continuous_count}",
-                (20, 60),
+                f"Objects: {len(detections)}",
+                (20, 30),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
                 (0, 255, 255),
                 2,
             )
 
-        # --------------------------------------------------
-        # Scan box
-        # --------------------------------------------------
+            if self.trigger_mode == TRIGGER_CONTINUOUS:
 
-        if self.scan_box is not None:
+                cv2.putText(
+                    frame,
+                    f"Count: {self.continuous_count}",
+                    (20, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 255, 255),
+                    2,
+                )
 
-            (
-                box_x1,
-                box_y1,
-                box_x2,
-                box_y2,
-            ) = self.scan_box
+            # --------------------------------------------------
+            # Scan box
+            # --------------------------------------------------
 
-            cv2.rectangle(
-                frame,
-                (box_x1, box_y1),
-                (box_x2, box_y2),
-                (255, 0, 255),
-                2,
-            )
+            if self.scan_box is not None:
 
-            cv2.putText(
-                frame,
-                "Scan Dot",
                 (
-                    box_x1 - 10,
-                    max(box_y1 - 10, 20),
-                ),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 0, 255),
-                2,
-            )
+                    box_x1,
+                    box_y1,
+                    box_x2,
+                    box_y2,
+                ) = self.scan_box
 
-        # --------------------------------------------------
-        # Preview Crop box
-        # --------------------------------------------------
+                cv2.rectangle(
+                    frame,
+                    (box_x1, box_y1),
+                    (box_x2, box_y2),
+                    (255, 0, 255),
+                    2,
+                )
 
-        if (
-            self.crop_box is not None
-            and self.show_crop_box
-        ):
+                cv2.putText(
+                    frame,
+                    "Scan Dot",
+                    (
+                        box_x1 - 10,
+                        max(box_y1 - 10, 20),
+                    ),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 0, 255),
+                    2,
+                )
 
-            (
-                crop_x1,
-                crop_y1,
-                crop_x2,
-                crop_y2,
-            ) = self.crop_box
+            # --------------------------------------------------
+            # Preview Crop box
+            # --------------------------------------------------
 
-            cv2.rectangle(
-                frame,
-                (crop_x1, crop_y1),
-                (crop_x2, crop_y2),
-                (0, 255, 0),
-                2,
-            )
+            if (
+                self.crop_box is not None
+                and self.show_crop_box
+            ):
 
-            cv2.putText(
-                frame,
-                "Preview Crop",
                 (
-                    crop_x1 - 10,
-                    max(crop_y1 - 10, 20),
-                ),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (0, 255, 0),
-                2,
-            )
+                    crop_x1,
+                    crop_y1,
+                    crop_x2,
+                    crop_y2,
+                ) = self.crop_box
 
-        # --------------------------------------------------
-        # Counting box
-        # --------------------------------------------------
+                cv2.rectangle(
+                    frame,
+                    (crop_x1, crop_y1),
+                    (crop_x2, crop_y2),
+                    (0, 255, 0),
+                    2,
+                )
 
-        if (
-            self.counting_box is not None
-            and self.show_counting_box
-        ):
+                cv2.putText(
+                    frame,
+                    "Preview Crop",
+                    (
+                        crop_x1 - 10,
+                        max(crop_y1 - 10, 20),
+                    ),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 0),
+                    2,
+                )
 
-            (
-                counting_x1,
-                counting_y1,
-                counting_x2,
-                counting_y2,
-            ) = self.counting_box
+            # --------------------------------------------------
+            # Counting box
+            # --------------------------------------------------
 
-            cv2.rectangle(
-                frame,
-                (counting_x1, counting_y1),
-                (counting_x2, counting_y2),
-                (255, 0, 0),
-                2,
-            )
+            if (
+                self.counting_box is not None
+                and self.show_counting_box
+            ):
 
-            cv2.putText(
-                frame,
-                "Counting Box",
                 (
-                    counting_x1 - 10,
-                    max(counting_y1 - 10, 20),
-                ),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 0, 0),
-                2,
-            )
+                    counting_x1,
+                    counting_y1,
+                    counting_x2,
+                    counting_y2,
+                ) = self.counting_box
 
-        return (
-            frame,
-            len(detections),
-        )
+                cv2.rectangle(
+                    frame,
+                    (counting_x1, counting_y1),
+                    (counting_x2, counting_y2),
+                    (255, 0, 0),
+                    2,
+                )
+
+                cv2.putText(
+                    frame,
+                    "Counting Box",
+                    (
+                        counting_x1 - 10,
+                        max(counting_y1 - 10, 20),
+                    ),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 0, 0),
+                    2,
+                )
+
+            return (
+                frame,
+                len(detections),
+            )
 
     
     # ==================================================
@@ -1281,7 +1396,9 @@ class CameraProcessor:
         year = today.strftime("%Y")
         month = today.strftime("%m")
         day = today.strftime("%d")
-        self.output_dir = get_output_dir()
+        self.output_dir = os.path.abspath(
+            get_output_dir()
+        )
 
         output_dir = os.path.join(
             self.output_dir,
@@ -1444,13 +1561,18 @@ class CameraProcessor:
         year = today.strftime("%Y")
         month = today.strftime("%m")
         day = today.strftime("%d")
-        self.output_dir = get_output_dir()
+        self.output_dir = os.path.abspath(
+            get_output_dir()
+        )
 
         output_dir = os.path.join(
             self.output_dir,
             self.inventory_type,
-            self.brand,
             self.tool,
+            self.brand,
+            year,
+            month,
+            day,
         )
 
         os.makedirs(
@@ -1490,12 +1612,11 @@ class CameraProcessor:
             json_filename,
         )
 
-        abs_filepath = os.path.abs(
+        abs_filepath = os.path.abspath(
             filepath
         )
 
-
-        absjson_filepath = os.path.abs(
+        absjson_filepath = os.path.abspath(
             json_filepath
         )
 

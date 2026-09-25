@@ -2,6 +2,7 @@ import multiprocessing
 import tkinter as tk
 
 from gui import ToolScannerGUI
+from performance_debug import print_perf_summary
 
 # ==================================================
 # Main
@@ -18,3 +19,4 @@ if __name__ == "__main__":
     )
 
     root.mainloop()
+    print_perf_summary()

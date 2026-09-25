@@ -1,3 +1,4 @@
+import json
 import tkinter as tk
 import os
 
@@ -26,6 +27,7 @@ from updater import (
     download_update,
     start_update,
 )
+from config import SETTINGS_FILE
 
 class ToolScannerGUI(
     VideoMixin,
@@ -43,8 +45,10 @@ class ToolScannerGUI(
             "Object Scanner"
         )
 
+        saved_size = self.load_window_size()
+
         self.root.geometry(
-            "1100x900"
+            f"{saved_size[0]}x{saved_size[1]}"
         )
 
         self.root.protocol(
@@ -360,6 +364,82 @@ class ToolScannerGUI(
         self.refresh_size_dropdowns()
         self.update_camera_metadata()
 
+    def load_window_size(self):
+        try:
+            if not os.path.exists(SETTINGS_FILE):
+                return (1100, 900)
+
+            with open(
+                SETTINGS_FILE,
+                "r",
+                encoding="utf-8",
+            ) as file:
+                settings = json.load(file)
+
+            if not isinstance(settings, dict):
+                return (1100, 900)
+
+            window_size = settings.get("window_size")
+
+            if not isinstance(window_size, dict):
+                return (1100, 900)
+
+            width = int(window_size.get("width", 1100))
+            height = int(window_size.get("height", 900))
+
+            if width > 0 and height > 0:
+                return (width, height)
+
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            json.JSONDecodeError,
+        ):
+            pass
+
+        return (1100, 900)
+
+    def save_window_size(self):
+        try:
+            if not os.path.exists(SETTINGS_FILE):
+                settings = {}
+            else:
+                with open(
+                    SETTINGS_FILE,
+                    "r",
+                    encoding="utf-8",
+                ) as file:
+                    settings = json.load(file)
+
+                if not isinstance(settings, dict):
+                    settings = {}
+
+            self.root.update_idletasks()
+            settings["window_size"] = {
+                "width": self.root.winfo_width(),
+                "height": self.root.winfo_height(),
+            }
+
+            os.makedirs(
+                os.path.dirname(SETTINGS_FILE),
+                exist_ok=True,
+            )
+
+            with open(
+                SETTINGS_FILE,
+                "w",
+                encoding="utf-8",
+            ) as file:
+                json.dump(settings, file, indent=4)
+
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            json.JSONDecodeError,
+        ):
+            pass
 
     def stop(self):
         if not self.running:
@@ -367,6 +447,7 @@ class ToolScannerGUI(
 
         self.running = False
 
+        self.save_window_size()
         self.stop_camera()
 
         if (

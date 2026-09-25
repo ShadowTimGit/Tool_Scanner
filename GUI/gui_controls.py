@@ -73,7 +73,7 @@ class ControlsMixin:
         )
 
         self.below_webcam_canvas.configure(
-            yscrollcommand=self.below_webcam_scrollbar.set
+            yscrollcommand=self.below_webcam_scrollbar.set,
         )
 
         self.below_webcam_frame = tk.Frame(
@@ -130,7 +130,7 @@ class ControlsMixin:
     def resize_below_webcam_content(self, event):
         self.below_webcam_canvas.itemconfig(
             self.below_webcam_window,
-            width=event.width,
+            width=max(event.width, self.below_webcam_frame.winfo_reqwidth()),
         )
 
     def on_below_webcam_mousewheel(self, event):
@@ -154,12 +154,62 @@ class ControlsMixin:
             pady=(0, 8),
         )
 
+        self.control_canvas = tk.Canvas(
+            self.control_frame,
+            highlightthickness=0,
+            bd=0,
+            height=48,
+        )
+
+        self.control_canvas.pack(
+            side=tk.TOP,
+            fill=tk.BOTH,
+            expand=True,
+        )
+
+        self.control_xscrollbar = ttk.Scrollbar(
+            self.control_frame,
+            orient=tk.HORIZONTAL,
+            command=self.control_canvas.xview,
+        )
+
+        self.control_xscrollbar.pack(
+            side=tk.BOTTOM,
+            fill=tk.X,
+        )
+
+        self.control_canvas.configure(
+            xscrollcommand=self.control_xscrollbar.set,
+        )
+
+        self.control_content = tk.Frame(
+            self.control_canvas,
+            padx=8,
+            pady=2,
+        )
+
+        self.control_window = self.control_canvas.create_window(
+            (0, 0),
+            window=self.control_content,
+            anchor="nw",
+        )
+
+        self.control_content.bind(
+            "<Configure>",
+            self.update_control_scroll_region,
+        )
+
+        self.control_canvas.bind(
+            "<Configure>",
+            self.resize_control_content,
+        )
+
         self.require_red_var = tk.BooleanVar(
             value=True
         )
 
         self.require_red_check = tk.Checkbutton(
-            self.control_frame,
+            self.control_content,
             text="Require Red Scan",
             variable=self.require_red_var,
             command=self.on_require_red_changed,
@@ -172,7 +222,7 @@ class ControlsMixin:
         )
 
         tk.Label(
-            self.control_frame,
+            self.control_content,
             text="Mode:",
             font=("Arial", 11, "bold"),
         ).pack(
@@ -185,7 +235,7 @@ class ControlsMixin:
         )
 
         self.trigger_mode_dropdown = ttk.Combobox(
-            self.control_frame,
+            self.control_content,
             textvariable=self.trigger_mode_var,
             values=[
                 TRIGGER_MANUAL,
@@ -207,7 +257,7 @@ class ControlsMixin:
         )
 
         tk.Label(
-            self.control_frame,
+            self.control_content,
             text="Camera:",
             font=("Arial", 11, "bold"),
         ).pack(
@@ -222,7 +272,7 @@ class ControlsMixin:
         )
 
         self.video_source_dropdown = ttk.Combobox(
-            self.control_frame,
+            self.control_content,
             textvariable=self.video_source_var,
             values=[
                 "0",
@@ -269,7 +319,7 @@ class ControlsMixin:
                 pass
 
         self.manual_trigger_button = tk.Button(
-            self.control_frame,
+            self.control_content,
             text=f"Capture [{self.manual_capture_key}]",
             command=self.manual_trigger,
             font=("Arial", 11, "bold"),
@@ -282,7 +332,7 @@ class ControlsMixin:
         )
 
         tk.Label(
-            self.control_frame,
+            self.control_content,
             text="Crop:",
             font=("Arial", 11, "bold"),
         ).pack(
@@ -295,7 +345,7 @@ class ControlsMixin:
         )
 
         self.crop_mode_dropdown = ttk.Combobox(
-            self.control_frame,
+            self.control_content,
             textvariable=self.crop_mode_var,
             values=[
                 CROP_MODE_FULL,
@@ -321,6 +371,17 @@ class ControlsMixin:
 
         self.update_manual_capture_key(
             self.manual_capture_key
+        )
+
+    def update_control_scroll_region(self, event=None):
+        self.control_canvas.configure(
+            scrollregion=self.control_canvas.bbox("all")
+        )
+
+    def resize_control_content(self, event):
+        self.control_canvas.itemconfigure(
+            self.control_window,
+            width=max(event.width, self.control_content.winfo_reqwidth()),
         )
 
     def update_manual_capture_key(self, key):
@@ -371,14 +432,9 @@ class ControlsMixin:
         self.update_manual_button_state()
 
     def update_manual_button_state(self):
-        if self.trigger_mode_var.get() == TRIGGER_MANUAL:
-            self.manual_trigger_button.config(
-                state=tk.NORMAL
-            )
-        else:
-            self.manual_trigger_button.config(
-                state=tk.DISABLED
-            )
+        self.manual_trigger_button.config(
+            state=tk.NORMAL
+        )
 
     def on_crop_mode_changed(self, event=None):
         if self.camera is None:
@@ -393,9 +449,6 @@ class ControlsMixin:
 
     def manual_trigger(self):
         if self.camera is None:
-            return
-
-        if self.trigger_mode_var.get() != TRIGGER_MANUAL:
             return
 
         self.camera.request_manual_capture()
