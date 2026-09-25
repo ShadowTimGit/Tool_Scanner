@@ -4,11 +4,9 @@ import sys
 
 from tool_logger.tool_logger_config import INPUT_ROOT
 from tool_logger.tool_logger_extraction import extract_tool_info
-from tool_logger.tool_logger_spreadsheets import (
-    save_to_spreadsheet,
-    rebuild_workbook_from_json,
-    sync_json_from_workbook,
-)
+from tool_logger.workbook import save_to_spreadsheet
+from tool_logger.json_sync import sync_json_from_workbook
+from tool_logger.tool_logger_spreadsheets import rebuild_workbook_from_json
 
 
 # ==================================================

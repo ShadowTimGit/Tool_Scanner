@@ -687,6 +687,29 @@ def format_purchases_sheet(
         column_widths,
     )
 
+    # Size formatting
+    size_headers = {
+        "Size-1",
+        "Size-2",
+    }
+
+    for header_cell in worksheet[1]:
+
+        if header_cell.value not in size_headers:
+            continue
+
+        column = header_cell.column
+
+        for row_number in range(
+            2,
+            worksheet.max_row + 1,
+        ):
+
+            worksheet.cell(
+                row=row_number,
+                column=column,
+            ).number_format = "@"
+
     # Center selected columns
     center_headers = {
         "Sold",
@@ -866,6 +889,29 @@ def format_sales_sheet(
         column_widths,
     )
 
+    # Size formatting
+    size_headers = {
+        "Size-1",
+        "Size-2",
+    }
+
+    for header_cell in worksheet[1]:
+
+        if header_cell.value not in size_headers:
+            continue
+
+        column = header_cell.column
+
+        for row_number in range(
+            2,
+            worksheet.max_row + 1,
+        ):
+
+            worksheet.cell(
+                row=row_number,
+                column=column,
+            ).number_format = "@"
+
     # Center Inventory Found
     for header_cell in worksheet[1]:
 
@@ -886,6 +932,44 @@ def format_sales_sheet(
                 horizontal="center",
                 vertical="center",
             )
+
+    # Highlight Inventory Found
+    found_fill = PatternFill(
+        fill_type="solid",
+        fgColor="C6EFCE",
+    )
+
+    not_found_fill = PatternFill(
+        fill_type="solid",
+        fgColor="FFC7CE",
+    )
+
+    for header_cell in worksheet[1]:
+
+        if header_cell.value != "Inventory Found":
+            continue
+
+        column = header_cell.column
+
+        for row_number in range(
+            2,
+            worksheet.max_row + 1,
+        ):
+
+            cell = worksheet.cell(
+                row=row_number,
+                column=column,
+            )
+
+            value = str(
+                cell.value
+            ).strip().upper()
+
+            if value == "YES":
+                cell.fill = found_fill
+
+            elif value == "NO":
+                cell.fill = not_found_fill
 
     # Price formatting
     price_headers = {
@@ -945,6 +1029,29 @@ def format_inventory_sheet(
         worksheet,
         column_widths,
     )
+
+    # Size formatting
+    size_headers = {
+        "Size-1",
+        "Size-2",
+    }
+
+    for header_cell in worksheet[1]:
+
+        if header_cell.value not in size_headers:
+            continue
+
+        column = header_cell.column
+
+        for row_number in range(
+            2,
+            worksheet.max_row + 1,
+        ):
+
+            worksheet.cell(
+                row=row_number,
+                column=column,
+            ).number_format = "@"
 
     # Centered Headers
     center_headers = {
