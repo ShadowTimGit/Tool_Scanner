@@ -2,7 +2,7 @@ import os
 
 DEFAULT_VIDEO_SOURCE = 0
 
-OUTPUT_DIR = "Output/Images"
+OUTPUT_DIR = "Output/Images/Inventory"
 
 # LOG_DIR = os.path.join(OUTPUT_DIR, "Logs")
 

@@ -149,7 +149,12 @@ class ToolSettings:
     def add_tool(self):
         tool_name = self.tool_entry.get().strip().title()
 
-        if not tool_name:
+        if not tool_name or tool_name == "NA":
+            messagebox.showwarning(
+                "Invalid Tool Name",
+                "The reserved NA entry cannot be added as a tool.",
+                parent=self.parent,
+            )
             return
 
         if any(
@@ -163,7 +168,7 @@ class ToolSettings:
             )
             return
 
-        self.tools[tool_name] = []
+        self.tools[tool_name] = ["NA"]
         self.tool_entry.delete(
             0,
             tk.END,
@@ -204,6 +209,9 @@ class ToolSettings:
 
         del self.tools[tool_name]
 
+        if not self.tools:
+            self.tools = {"NA": ["NA"]}
+
         self.save_tools()
         self.refresh_dropdowns()
 
@@ -215,7 +223,7 @@ class ToolSettings:
 
     def refresh_dropdowns(self):
         tool_names = sorted(
-            self.tools.keys(),
+            [name for name in self.tools.keys() if name != "NA"],
             key=str.casefold,
         )
 

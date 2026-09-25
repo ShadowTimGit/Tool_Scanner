@@ -145,14 +145,6 @@ class MetadataSettings:
             1,
         )
 
-        self.create_option_editor(
-            options_frame,
-            "Specialty Socket",
-            "specialty_socket",
-            1,
-            1,
-        )
-
     def create_size_editor(self, parent):
         frame = tk.LabelFrame(
             parent,
@@ -687,6 +679,12 @@ class MetadataSettings:
 
     def save_metadata(self):
         try:
+            serializable_metadata = {
+                key: copy.deepcopy(value)
+                for key, value in self.metadata.items()
+                if key != "specialty_socket"
+            }
+
             os.makedirs(
                 SETTINGS_DIR,
                 exist_ok=True,
@@ -698,7 +696,7 @@ class MetadataSettings:
                 encoding="utf-8",
             ) as file:
                 json.dump(
-                    self.metadata,
+                    serializable_metadata,
                     file,
                     indent=4,
                 )
@@ -716,15 +714,14 @@ class MetadataSettings:
 
     @staticmethod
     def load_metadata():
+        default_metadata = copy.deepcopy(DEFAULT_METADATA)
+        default_metadata.pop("specialty_socket", None)
+
         if not os.path.exists(METADATA_FILE):
             try:
                 os.makedirs(
                     SETTINGS_DIR,
                     exist_ok=True,
-                )
-
-                default_metadata = copy.deepcopy(
-                    DEFAULT_METADATA
                 )
 
                 with open(
@@ -738,12 +735,17 @@ class MetadataSettings:
                         indent=4,
                     )
 
-                return default_metadata
-
             except OSError:
-                return copy.deepcopy(
-                    DEFAULT_METADATA
-                )
+                pass
+
+            normalized = copy.deepcopy(DEFAULT_METADATA)
+            normalized.pop("specialty_socket", None)
+            normalized["specialty_socket"] = [
+                value.strip()
+                for value in DEFAULT_METADATA.get("specialty_socket", [])
+                if isinstance(value, str) and value.strip()
+            ]
+            return normalized
 
         try:
             with open(
@@ -754,79 +756,62 @@ class MetadataSettings:
                 data = json.load(file)
 
             if not isinstance(data, dict):
-                return copy.deepcopy(
-                    DEFAULT_METADATA
-                )
+                raise ValueError("Invalid metadata file")
+
+            if "specialty_socket" in data:
+                data.pop("specialty_socket", None)
+                with open(
+                    METADATA_FILE,
+                    "w",
+                    encoding="utf-8",
+                ) as output_file:
+                    json.dump(data, output_file, indent=4)
 
             normalized = {
                 "sizes": {},
             }
 
-            # ---------------------------------------------
-            # Sizes
-            # ---------------------------------------------
-
-            saved_sizes = data.get(
-                "sizes",
-                {},
-            )
-
+            saved_sizes = data.get("sizes", {})
             if not isinstance(saved_sizes, dict):
                 saved_sizes = {}
 
-            for dataset in (
-                "SAE",
-                "Metric",
-                "Other",
-            ):
-                values = saved_sizes.get(
-                    dataset,
-                    [],
-                )
-
+            for dataset in ("SAE", "Metric", "Other"):
+                values = saved_sizes.get(dataset, [])
                 if not isinstance(values, list):
                     values = []
 
                 normalized["sizes"][dataset] = [
                     value.strip()
                     for value in values
-                    if isinstance(value, str)
-                    and value.strip()
+                    if isinstance(value, str) and value.strip()
                 ]
 
-            # ---------------------------------------------
-            # Other Metadata
-            # ---------------------------------------------
-
-            for key in (
-                "drive",
-                "point",
-                "specialty_socket",
-            ):
-                values = data.get(
-                    key,
-                    [],
-                )
-
+            for key in ("drive", "point"):
+                values = data.get(key, [])
                 if not isinstance(values, list):
                     values = []
 
                 normalized[key] = [
                     value.strip()
                     for value in values
-                    if isinstance(value, str)
-                    and value.strip()
+                    if isinstance(value, str) and value.strip()
                 ]
+
+            normalized["specialty_socket"] = [
+                value.strip()
+                for value in DEFAULT_METADATA.get("specialty_socket", [])
+                if isinstance(value, str) and value.strip()
+            ]
 
             return normalized
 
         except (
             OSError,
+            ValueError,
+            TypeError,
             json.JSONDecodeError,
         ):
-            return copy.deepcopy(
-                DEFAULT_METADATA
-            )
+            return copy.deepcopy(DEFAULT_METADATA)
     # =========================================================
     # Notification
     # =========================================================

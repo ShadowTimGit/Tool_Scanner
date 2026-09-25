@@ -1,16 +1,23 @@
+import copy
 import json
 import os
 import tkinter as tk
 from tkinter import ttk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 
 from master_conversion import convert_item_master
 
 from config import (
+    DEFAULT_BOX,
+    DEFAULT_CROP,
     SETTINGS_FILE,
     OUTPUT_DIR,
 )
 from Camera.camera import SUPPORTED_RESOLUTIONS
+from settings_menu.brand_settings import DEFAULT_BRANDS
+from settings_menu.inventory_settings import DEFAULT_INVENTORY
+from settings_menu.tool_repository import DEFAULT_TOOLS
+from settings_menu.settings_config import DEFAULT_METADATA
 
 from logger import rebuild_workbook_from_json, sync_json_from_workbook
 
@@ -277,20 +284,250 @@ class GeneralSettings:
                 f"{error}"
             )
 
+    @staticmethod
+    def _box_dict(bounds):
+        x1, y1, x2, y2 = bounds
+        return {
+            "x": int(x1),
+            "y": int(y1),
+            "width": int(x2 - x1),
+            "height": int(y2 - y1),
+        }
+
+    def _default_settings_dict(self):
+        width = getattr(self.camera, "camera_width", 1920)
+        height = getattr(self.camera, "camera_height", 1080)
+
+        return {
+            "scan_box": self._box_dict(DEFAULT_BOX),
+            "crop_box": self._box_dict(DEFAULT_CROP),
+            "crop_analyzed_images": False,
+            "camera_resolution": {
+                "width": int(width),
+                "height": int(height),
+            },
+            "counting_box": self._box_dict(DEFAULT_CROP),
+            "output_dir": OUTPUT_DIR,
+            "manual_capture_key": "space",
+            "window_size": {
+                "width": 1100,
+                "height": 900,
+            },
+        }
+
+    def reset_settings_file(self, include_window_size=True):
+        settings = self._default_settings_dict()
+        if include_window_size:
+            settings["window_size"] = {
+                "width": 1100,
+                "height": 900,
+            }
+        else:
+            settings.pop("window_size", None)
+
+        os.makedirs(
+            os.path.dirname(SETTINGS_FILE),
+            exist_ok=True,
+        )
+
+        with open(
+            SETTINGS_FILE,
+            "w",
+            encoding="utf-8",
+        ) as file:
+            json.dump(settings, file, indent=4)
+
+    def reset_modifiable_settings(self):
+        if not messagebox.askyesno(
+            "Full Wipe",
+            "This will clear the custom option data so the stored lists are blank/NA and can be re-entered manually.\n\nIt does not overwrite the app base settings file.",
+            parent=self.parent,
+        ):
+            return
+
+        empty_brands = {}
+        with open(
+            os.path.join(
+                os.path.dirname(__file__),
+                "settings",
+                "brands.json",
+            ),
+            "w",
+            encoding="utf-8",
+        ) as file:
+            json.dump(empty_brands, file, indent=4)
+
+        empty_inventory = {"estimated_values": {}}
+        inventory_path = os.path.join(
+            os.path.dirname(__file__),
+            "settings",
+            "inventory_settings.json",
+        )
+        with open(inventory_path, "w", encoding="utf-8") as file:
+            json.dump(empty_inventory, file, indent=4)
+
+        empty_metadata = {
+            "sizes": {
+                "SAE": ["NA"],
+                "Metric": ["NA"],
+                "Other": ["NA"],
+            },
+            "drive": ["NA"],
+            "point": ["NA"],
+        }
+        metadata_path = os.path.join(
+            os.path.dirname(__file__),
+            "settings",
+            "metadata_options.json",
+        )
+        with open(metadata_path, "w", encoding="utf-8") as file:
+            json.dump(empty_metadata, file, indent=4)
+
+        empty_tools = {"NA": ["NA"]}
+        tools_path = os.path.join(
+            os.path.dirname(__file__),
+            "settings",
+            "tools.json",
+        )
+        with open(tools_path, "w", encoding="utf-8") as file:
+            json.dump(empty_tools, file, indent=4)
+
+        if hasattr(self.main_gui, "refresh_main_settings"):
+            self.main_gui.refresh_main_settings()
+
+        messagebox.showinfo(
+            "Full Wipe Complete",
+            "The custom option entries have been cleared to blank/NA values and can be re-entered manually.",
+            parent=self.parent,
+        )
+
+    def reset_all_settings(self):
+        if not messagebox.askyesno(
+            "Reset All Default Settings",
+            "This will restore all stored settings JSON files to their default values: brands.json, inventory_settings.json, metadata_options.json, tools.json, and settings.json.",
+            parent=self.parent,
+        ):
+            return
+
+        with open(
+            os.path.join(
+                os.path.dirname(__file__),
+                "settings",
+                "brands.json",
+            ),
+            "w",
+            encoding="utf-8",
+        ) as file:
+            json.dump(copy.deepcopy(DEFAULT_BRANDS), file, indent=4)
+
+        inventory_path = os.path.join(
+            os.path.dirname(__file__),
+            "settings",
+            "inventory_settings.json",
+        )
+        with open(inventory_path, "w", encoding="utf-8") as file:
+            json.dump({"estimated_values": copy.deepcopy(DEFAULT_INVENTORY)}, file, indent=4)
+
+        metadata_path = os.path.join(
+            os.path.dirname(__file__),
+            "settings",
+            "metadata_options.json",
+        )
+        default_metadata = copy.deepcopy(DEFAULT_METADATA)
+        default_metadata.pop("specialty_socket", None)
+        with open(metadata_path, "w", encoding="utf-8") as file:
+            json.dump(default_metadata, file, indent=4)
+
+        tools_path = os.path.join(
+            os.path.dirname(__file__),
+            "settings",
+            "tools.json",
+        )
+        with open(tools_path, "w", encoding="utf-8") as file:
+            json.dump(copy.deepcopy(DEFAULT_TOOLS), file, indent=4)
+
+        self.reset_settings_file(include_window_size=True)
+
+        if hasattr(self.main_gui, "refresh_main_settings"):
+            self.main_gui.refresh_main_settings()
+
+        messagebox.showinfo(
+            "Defaults Restored",
+            "The stored JSON settings files have been restored to their default values.",
+            parent=self.parent,
+        )
+
     def create_gui(self):
-        frame = tk.Frame(
+        outer_frame = tk.Frame(
             self.parent,
             padx=20,
             pady=20,
         )
 
-        frame.pack(
+        outer_frame.pack(
             fill=tk.BOTH,
             expand=True,
         )
 
+        canvas = tk.Canvas(
+            outer_frame,
+            highlightthickness=0,
+        )
+        scrollbar = ttk.Scrollbar(
+            outer_frame,
+            orient=tk.VERTICAL,
+            command=canvas.yview,
+        )
+
+        canvas.pack(
+            side=tk.LEFT,
+            fill=tk.BOTH,
+            expand=True,
+        )
+        scrollbar.pack(
+            side=tk.RIGHT,
+            fill=tk.Y,
+        )
+
+        canvas.configure(
+            yscrollcommand=scrollbar.set,
+        )
+
+        content_frame = tk.Frame(
+            canvas,
+            padx=4,
+            pady=4,
+        )
+        canvas_window = canvas.create_window(
+            (0, 0),
+            window=content_frame,
+            anchor="nw",
+        )
+
+        def _update_scrollregion(event=None):
+            canvas_width = max(
+                canvas.winfo_width(),
+                content_frame.winfo_reqwidth(),
+            )
+            canvas.itemconfigure(
+                canvas_window,
+                width=canvas_width,
+            )
+            canvas.configure(
+                scrollregion=canvas.bbox("all"),
+            )
+
+        content_frame.bind(
+            "<Configure>",
+            _update_scrollregion,
+        )
+        canvas.bind(
+            "<Configure>",
+            _update_scrollregion,
+        )
+
         tk.Label(
-            frame,
+            content_frame,
             text="General Settings",
             font=("Arial", 14, "bold"),
         ).pack(
@@ -299,7 +536,7 @@ class GeneralSettings:
         )
 
         settings_frame = tk.Frame(
-            frame,
+            content_frame,
             relief=tk.GROOVE,
             borderwidth=1,
             padx=15,
@@ -352,7 +589,6 @@ class GeneralSettings:
             padx=(10, 0),
         )
 
-
         tk.Label(
             settings_frame,
             text="Log Directory",
@@ -363,11 +599,29 @@ class GeneralSettings:
         )
 
         # -------------------------
-        # Camera Resolution
+        # Camera Resolution + Manual Capture Shortcut
         # -------------------------
 
-        tk.Label(
+        chooser_row = tk.Frame(
             settings_frame,
+        )
+        chooser_row.pack(
+            fill=tk.X,
+            pady=(0, 20),
+        )
+
+        resolution_frame = tk.Frame(
+            chooser_row,
+            width=280,
+        )
+        resolution_frame.pack(
+            side=tk.LEFT,
+            fill=tk.Y,
+            padx=(0, 12),
+        )
+
+        tk.Label(
+            resolution_frame,
             text="Camera Resolution",
             font=("Arial", 10, "bold"),
         ).pack(
@@ -381,7 +635,7 @@ class GeneralSettings:
         ]
 
         resolution_dropdown = ttk.Combobox(
-            settings_frame,
+            resolution_frame,
             textvariable=self.camera_resolution,
             values=resolution_values,
             state="readonly",
@@ -390,7 +644,6 @@ class GeneralSettings:
 
         resolution_dropdown.pack(
             anchor="w",
-            pady=(0, 20),
         )
 
         resolution_dropdown.bind(
@@ -398,12 +651,17 @@ class GeneralSettings:
             self.change_camera_resolution,
         )
 
-        # -------------------------
-        # Manual Capture Shortcut
-        # -------------------------
+        manual_capture_frame = tk.Frame(
+            chooser_row,
+            width=260,
+        )
+        manual_capture_frame.pack(
+            side=tk.LEFT,
+            fill=tk.Y,
+        )
 
         tk.Label(
-            settings_frame,
+            manual_capture_frame,
             text="Manual Capture Shortcut",
             font=("Arial", 10, "bold"),
         ).pack(
@@ -429,7 +687,7 @@ class GeneralSettings:
         ]
 
         manual_capture_dropdown = ttk.Combobox(
-            settings_frame,
+            manual_capture_frame,
             textvariable=self.manual_capture_key,
             values=manual_capture_values,
             state="readonly",
@@ -438,7 +696,6 @@ class GeneralSettings:
 
         manual_capture_dropdown.pack(
             anchor="w",
-            pady=(0, 20),
         )
 
         manual_capture_dropdown.bind(
@@ -498,8 +755,37 @@ class GeneralSettings:
             pady=(10, 0),
         )
 
+        tk.Label(
+            settings_frame,
+            text="Reset all saved custom options to the built-in defaults.",
+            font=("Arial", 10, "bold"),
+        ).pack(
+            anchor="w",
+            pady=(20, 0),
+        )
 
+        tk.Button(
+            settings_frame,
+            text="Reset All Default Settings",
+            command=self.reset_all_settings,
+            width=24,
+        ).pack(
+            anchor="w",
+            pady=(6, 0),
+        )
 
+        tk.Button(
+            settings_frame,
+            text="Full Wipe",
+            command=self.reset_modifiable_settings,
+            width=24,
+        ).pack(
+            anchor="w",
+            pady=(6, 0),
+        )
+
+        canvas.update_idletasks()
+        _update_scrollregion()
     def convert_item_master(self):
         file_path = filedialog.askopenfilename(
             title="Select Item Master Workbook",

@@ -182,7 +182,7 @@ class ToolsMixin:
 
         tool_name = self.tool_var.get()
 
-        if tool_name not in self.tools:
+        if tool_name not in self.tools or tool_name == "NA":
             self.specialization_dropdown["values"] = []
             self.specialization_dropdown.set("")
 
@@ -195,27 +195,17 @@ class ToolsMixin:
 
         specializations = self.tools[tool_name]
 
-        self.specialization_dropdown["values"] = (
-            specializations
-        )
+        effective_values = [value for value in specializations if value not in (None, "", "NA")]
 
-        if specializations:
-            self.specialization_dropdown.set(
-                specializations[0]
-            )
+        if not effective_values:
+            self.specialization_dropdown["values"] = ["NA"]
+            self.specialization_dropdown.set("NA")
+            self.camera.set_tool_selection(tool_name, "NA")
+            return
 
-            self.camera.set_tool_selection(
-                tool_name,
-                specializations[0],
-            )
-
-        else:
-            self.specialization_dropdown.set("")
-
-            self.camera.set_tool_selection(
-                tool_name,
-                "",
-            )
+        self.specialization_dropdown["values"] = effective_values
+        self.specialization_dropdown.set(effective_values[0])
+        self.camera.set_tool_selection(tool_name, effective_values[0])
 
     def open_settings(self):
         if self.camera is None:
@@ -240,15 +230,15 @@ class ToolsMixin:
         )
 
     def tools_changed(self):
-        tool_names = list(
-            self.tools.keys()
-        )
+        tool_names = [
+            name for name in self.tools.keys() if name != "NA"
+        ]
 
         self.tool_dropdown["values"] = tool_names
 
         current_tool = self.tool_var.get()
 
-        if current_tool in self.tools:
+        if current_tool in self.tools and current_tool != "NA":
             self.tool_dropdown.set(
                 current_tool
             )

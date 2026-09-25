@@ -36,6 +36,7 @@ from .workbook_paths import (
 
 from .json_sync import (
     load_invoice_prices,
+    get_cell_path_value,
 )
 
 from .formatting import (
@@ -384,6 +385,142 @@ def rebuild_workbook(
     workbook.close()
 
     return workbook_path
+
+# ==================================================
+# Remove a single row from the workbook by JSON/image path
+# ==================================================
+
+def remove_row_from_workbook_by_path(
+    json_path=None,
+    image_path=None,
+):
+    workbook_path = ensure_workbook()
+
+    if not os.path.exists(workbook_path):
+        return False
+
+    workbook = load_workbook(
+        workbook_path,
+        data_only=False,
+    )
+
+    removed = False
+    requested_paths = []
+
+    for candidate in (json_path, image_path):
+        if candidate is None:
+            continue
+        value = str(candidate).strip()
+        if value and value.lower() != "none":
+            requested_paths.append(
+                os.path.normcase(
+                    os.path.normpath(
+                        os.path.abspath(
+                            value
+                        )
+                    )
+                )
+            )
+
+    for sheet_name in ("Purchases", "Sales"):
+        worksheet = workbook[sheet_name]
+
+        header_map = {
+            cell.value: cell.column
+            for cell in worksheet[1]
+            if cell.value is not None
+        }
+
+        json_column = header_map.get("File Path to JSON")
+        image_column = header_map.get("File Path to Image")
+
+        if json_column is None and image_column is None:
+            continue
+
+        for row_number in range(
+            worksheet.max_row,
+            1,
+            -1,
+        ):
+            match = False
+
+            if json_column is not None:
+                json_value = get_cell_path_value(
+                    worksheet.cell(
+                        row=row_number,
+                        column=json_column,
+                    )
+                )
+                if json_value:
+                    json_norm = os.path.normcase(
+                        os.path.normpath(
+                            os.path.abspath(json_value)
+                        )
+                    )
+                    for requested in requested_paths:
+                        if json_norm == requested:
+                            match = True
+                            break
+                        if os.path.basename(json_value) == os.path.basename(str(requested).replace('\\','/')):
+                            match = True
+                            break
+
+            if not match and image_column is not None:
+                image_value = get_cell_path_value(
+                    worksheet.cell(
+                        row=row_number,
+                        column=image_column,
+                    )
+                )
+                if image_value:
+                    image_norm = os.path.normcase(
+                        os.path.normpath(
+                            os.path.abspath(image_value)
+                        )
+                    )
+                    for requested in requested_paths:
+                        if image_norm == requested:
+                            match = True
+                            break
+                        if os.path.basename(image_value) == os.path.basename(str(requested).replace('\\','/')):
+                            match = True
+                            break
+
+            if match:
+                worksheet.delete_rows(
+                    row_number,
+                    1,
+                )
+                removed = True
+                break
+
+        if removed:
+            break
+
+    if not removed:
+        workbook.close()
+        return False
+
+    workbook.save(workbook_path)
+    workbook.close()
+
+    workbook = load_workbook(
+        workbook_path,
+        data_only=False,
+    )
+
+    if "Purchases" in workbook.sheetnames:
+        purchases_sheet = workbook["Purchases"]
+        invoice_prices = load_invoice_prices(
+            purchases_sheet
+        )
+    else:
+        invoice_prices = {}
+
+    workbook.close()
+    rebuild_workbook(invoice_prices)
+
+    return True
 
 # ==================================================
 # Rebuild Sheet

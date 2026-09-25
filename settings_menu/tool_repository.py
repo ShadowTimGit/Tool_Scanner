@@ -40,6 +40,32 @@ DEFAULT_TOOLS = {
 class ToolRepository:
 
     @staticmethod
+    def normalize_tools(data):
+        if not isinstance(data, dict) or not data:
+            return {"NA": ["NA"]}
+
+        normalized_tools = {}
+
+        for tool_name, sizes in data.items():
+            if not isinstance(tool_name, str):
+                continue
+
+            if not isinstance(sizes, list):
+                continue
+
+            cleaned_sizes = [value for value in sizes if value not in (None, "", "NA")]
+
+            if not cleaned_sizes:
+                normalized_tools[tool_name] = ["NA"]
+            else:
+                normalized_tools[tool_name] = cleaned_sizes
+
+        if not normalized_tools:
+            return {"NA": ["NA"]}
+
+        return normalized_tools
+
+    @staticmethod
     def load_tools():
         if not os.path.exists(SETTINGS_FILE):
             return {
@@ -55,28 +81,13 @@ class ToolRepository:
             ) as file:
                 data = json.load(file)
 
-            if not isinstance(data, dict):
-                return {}
-
-            normalized_tools = {}
-
-            for tool_name, sizes in data.items():
-
-                if not isinstance(tool_name, str):
-                    return {}
-
-                if not isinstance(sizes, list):
-                    return {}
-
-                normalized_tools[tool_name] = []
-
-            return normalized_tools
+            return ToolRepository.normalize_tools(data)
 
         except (
             OSError,
             json.JSONDecodeError,
         ):
-            return {}
+            return {"NA": ["NA"]}
 
     @staticmethod
     def save_tools(tools):

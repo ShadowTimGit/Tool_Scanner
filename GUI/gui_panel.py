@@ -15,6 +15,9 @@ from tool_logger.tool_logger_config import INPUT_ROOT
 from tool_logger.tool_logger_spreadsheets import (
     rebuild_workbook_from_json,
 )
+from tool_logger.workbook import (
+    remove_row_from_workbook_by_path,
+)
 from tool_logger.json_sync import sync_json_from_workbook
 
 
@@ -45,8 +48,44 @@ class RightPanelMixin:
         # Notebook tabs
         # ---------------------------------------------------------
 
+        style = ttk.Style(self.root)
+
+        style.configure(
+            "RightPanel.TNotebook",
+            background="#dfe3ea",
+            borderwidth=0,
+            padding=0,
+        )
+
+        style.configure(
+            "RightPanel.TNotebook.Tab",
+            background="#c8ced8",
+            foreground="#1f2937",
+            padding=(14, 8),
+            relief="flat",
+            borderwidth=1,
+            font=("Arial", 10, "bold"),
+        )
+
+        style.map(
+            "RightPanel.TNotebook.Tab",
+            background=[
+                ("selected", "#ffffff"),
+                ("active", "#e6ecff"),
+            ],
+            foreground=[
+                ("selected", "#111827"),
+                ("active", "#111827"),
+            ],
+            bordercolor=[
+                ("selected", "#b8c0cc"),
+                ("active", "#aab7c8"),
+            ],
+        )
+
         self.right_panel_notebook = ttk.Notebook(
             self.right_panel,
+            style="RightPanel.TNotebook",
         )
 
         self.right_panel_notebook.pack(
@@ -71,6 +110,7 @@ class RightPanelMixin:
             self.selection_tab,
             highlightthickness=0,
             bd=0,
+            width=260,
         )
 
         self.right_panel_canvas.pack(
@@ -219,6 +259,7 @@ class RightPanelMixin:
             container,
             highlightthickness=0,
             bd=0,
+            width=260,
         )
 
         self.recent_crops_canvas.pack(
@@ -277,12 +318,24 @@ class RightPanelMixin:
         )
 
     def _update_recent_crops_scrollregion(self, event=None):
-        bbox = self.recent_crops_canvas.bbox("all")
+        if not hasattr(self, "recent_crops_canvas"):
+            return
 
-        if bbox is not None:
-            self.recent_crops_canvas.configure(
-                scrollregion=bbox,
-            )
+        self.recent_crops_canvas.update_idletasks()
+
+        canvas_width = max(self.recent_crops_canvas.winfo_width(), 220)
+        content_width = max(
+            self.recent_crops_list.winfo_reqwidth(),
+            canvas_width,
+        )
+        content_height = max(
+            self.recent_crops_list.winfo_reqheight(),
+            1,
+        )
+
+        self.recent_crops_canvas.configure(
+            scrollregion=(0, 0, content_width + 20, content_height + 20),
+        )
 
     def _resize_recent_crops_content(self, event):
         if hasattr(self, "recent_crops_window_id"):
@@ -290,15 +343,31 @@ class RightPanelMixin:
                 self.recent_crops_window_id,
                 width=max(1, event.width),
             )
+            self._update_recent_crops_scrollregion()
 
     def refresh_recent_crops(self):
         if not hasattr(self, "recent_crops_list"):
             return
 
+        entries = self.get_recent_crop_entries()
+        signature = tuple(
+            (
+                entry.get("image_path"),
+                entry.get("json_path"),
+                entry.get("display_name"),
+                entry.get("tool_name"),
+            )
+            for entry in entries
+        )
+
+        if getattr(self, "_recent_crop_signature", None) == signature:
+            self._update_recent_crops_scrollregion()
+            return
+
+        self._recent_crop_signature = signature
+
         for child in self.recent_crops_list.winfo_children():
             child.destroy()
-
-        entries = self.get_recent_crop_entries()
 
         if not entries:
             tk.Label(
@@ -383,6 +452,13 @@ class RightPanelMixin:
                 pady=(6, 0),
             )
 
+            self._right_panel_add_mousewheel_bindings(row)
+            self._right_panel_add_mousewheel_bindings(body)
+            self._right_panel_add_mousewheel_bindings(image_label)
+            self._right_panel_add_mousewheel_bindings(info)
+            self._right_panel_add_mousewheel_bindings(remove_button)
+
+        self.recent_crops_list.update_idletasks()
         self._update_recent_crops_scrollregion()
 
     def get_recent_crop_entries(self):
@@ -540,11 +616,13 @@ class RightPanelMixin:
             ]
 
         try:
-            rebuild_workbook_from_json()
-            sync_json_from_workbook()
+            remove_row_from_workbook_by_path(
+                json_path=json_path,
+                image_path=image_path,
+            )
         except Exception as error:
             print(
-                f"ERROR: Could not rebuild logger after crop removal: {error}"
+                f"ERROR: Could not remove crop row from workbook: {error}"
             )
 
         self.refresh_recent_crops()
@@ -555,63 +633,48 @@ class RightPanelMixin:
 
     def _setup_right_panel_mousewheel(self):
         """
-        Install one mouse-wheel binding for the entire right panel.
-
-        The binding uses bind_class() so we don't have to recursively
-        bind every widget inside the scrollable frame.
+        Bind mouse-wheel scrolling directly to the right panel and all of
+        its descendants so hover anywhere in the panel scrolls correctly,
+        including dynamically created crop items.
         """
 
-        self._right_panel_mousewheel_tag = (
-            "RightPanelMouseWheel"
-        )
-
+        self._right_panel_mousewheel_tag = "RightPanelMouseWheel"
         self.root.bind_class(
             self._right_panel_mousewheel_tag,
             "<MouseWheel>",
             self._right_panel_mousewheel,
         )
-
-        self._right_panel_add_mousewheel_bindings(
-            self.right_panel
+        self.root.bind_class(
+            self._right_panel_mousewheel_tag,
+            "<Shift-MouseWheel>",
+            self._right_panel_mousewheel,
         )
+
+        self._right_panel_add_mousewheel_bindings(self.right_panel)
 
     def _right_panel_add_mousewheel_bindings(self, widget):
-        """
-        Add the right-panel mouse-wheel bindtag to every widget.
-
-        This allows the panel to scroll regardless of which child
-        widget the mouse is currently over.
-
-        The widget's own bindings remain intact.
-        """
-
-        bindtags = list(widget.bindtags())
+        """Attach scroll behavior to this widget and all child widgets."""
+        try:
+            bindtags = list(widget.bindtags())
+        except Exception:
+            return
 
         if self._right_panel_mousewheel_tag not in bindtags:
-            bindtags.append(
-                self._right_panel_mousewheel_tag
-            )
-
+            bindtags.append(self._right_panel_mousewheel_tag)
             widget.bindtags(tuple(bindtags))
 
+        try:
+            widget.bind("<MouseWheel>", self._right_panel_mousewheel)
+            widget.bind("<Shift-MouseWheel>", self._right_panel_mousewheel)
+        except Exception:
+            pass
+
         for child in widget.winfo_children():
-            self._right_panel_add_mousewheel_bindings(
-                child
-            )
+            self._right_panel_add_mousewheel_bindings(child)
 
     def _right_panel_mousewheel(self, event):
-        """
-        Scroll the right panel.
-
-        Dropdown widgets are deliberately ignored so their native
-        mouse-wheel behavior remains untouched.
-        """
-
-        widget = self.root.winfo_containing(
-            event.x_root,
-            event.y_root,
-        )
-
+        """Scroll the current active right-panel canvas."""
+        widget = self.root.winfo_containing(event.x_root, event.y_root)
         if widget is None:
             return
 
@@ -621,12 +684,36 @@ class RightPanelMixin:
         if self._is_dropdown_widget(widget):
             return
 
-        self.right_panel_canvas.yview_scroll(
-            -1 if event.delta > 0 else 1,
-            "units",
-        )
+        target_canvas = self._get_active_right_panel_canvas(widget)
+        if target_canvas is None:
+            return
 
+        target_canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
         return "break"
+
+    def _get_active_right_panel_canvas(self, widget):
+        current = widget
+        while current is not None:
+            if current == self.recent_crops_canvas:
+                return self.recent_crops_canvas
+            if current == self.right_panel_canvas:
+                return self.right_panel_canvas
+            current = getattr(current, "master", None)
+
+        active_tab = self.right_panel_notebook.select()
+        if active_tab == str(self.recent_crops_tab):
+            return getattr(self, "recent_crops_canvas", None)
+        return getattr(self, "right_panel_canvas", None)
+
+    def _is_inside_right_panel(self, widget):
+        current = widget
+        while current is not None:
+            if current == self.right_panel:
+                return True
+            if current == self.right_panel_notebook:
+                return True
+            current = getattr(current, "master", None)
+        return False
 
     def _is_inside_right_panel(self, widget):
         current = widget
@@ -674,8 +761,22 @@ class RightPanelMixin:
     # ---------------------------------------------------------
 
     def _update_right_panel_scrollregion(self, event=None):
+        if not hasattr(self, "right_panel_canvas"):
+            return
+
+        self.right_panel_canvas.update_idletasks()
+        canvas_width = max(self.right_panel_canvas.winfo_width(), 220)
+        content_width = max(
+            self.right_panel_content.winfo_reqwidth(),
+            canvas_width,
+        )
+        content_height = max(
+            self.right_panel_content.winfo_reqheight(),
+            1,
+        )
+
         self.right_panel_canvas.configure(
-            scrollregion=self.right_panel_canvas.bbox("all")
+            scrollregion=(0, 0, content_width + 20, content_height + 20),
         )
 
     def _resize_right_panel_content(self, event):
@@ -683,6 +784,7 @@ class RightPanelMixin:
             self.right_panel_window,
             width=max(event.width, self.right_panel_content.winfo_reqwidth()),
         )
+        self._update_right_panel_scrollregion()
 
     # ---------------------------------------------------------
     # Inventory
