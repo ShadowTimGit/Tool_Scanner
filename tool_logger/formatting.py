@@ -283,6 +283,68 @@ def format_overview_sheet(worksheet):
         )
 
     # ------------------------------------------------
+    # Storefront Sales Volume
+    # ------------------------------------------------
+
+    worksheet.merge_cells("H10:I10")
+
+    for cell_reference in (
+        "H10",
+        "I10",
+    ):
+
+        cell = worksheet[cell_reference]
+
+        cell.fill = section_fill
+        cell.font = section_font
+        cell.alignment = Alignment(
+            horizontal="center",
+            vertical="center",
+        )
+
+    worksheet["H10"] = "Platform Purchase"
+
+    worksheet.row_dimensions[10].height = 24
+
+    for cell_reference in (
+        "H11",
+        "H12",
+        "H13",
+    ):
+
+        cell = worksheet[cell_reference]
+
+        cell.fill = label_fill
+        cell.font = Font(
+            name="Arial",
+            size=11,
+            bold=True,
+        )
+        cell.alignment = Alignment(
+            horizontal="center",
+            vertical="center",
+            wrap_text=True,
+        )
+
+    for cell_reference in (
+        "I11",
+        "I12",
+        "I13",
+    ):
+
+        cell = worksheet[cell_reference]
+
+        cell.fill = value_fill
+        cell.font = Font(
+            name="Arial",
+            size=11,
+        )
+        cell.alignment = Alignment(
+            horizontal="center",
+            vertical="center",
+        )
+
+    # ------------------------------------------------
     # Number Formatting
     # ------------------------------------------------
 

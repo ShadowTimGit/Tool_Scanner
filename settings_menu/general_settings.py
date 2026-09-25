@@ -460,19 +460,6 @@ class GeneralSettings:
         )
 
         # -------------------------
-        # Logger
-        # -------------------------
-
-        tk.Label(
-            settings_frame,
-            text="Logger - The Rebuilder will rebuild the excel spreadsheet from existing json files",
-            font=("Arial", 10, "bold"),
-        ).pack(
-            anchor="w",
-            pady=(20, 5),
-        )
-
-        # -------------------------
         # Rebuild and Sync Logs
         # -------------------------
 
@@ -511,18 +498,6 @@ class GeneralSettings:
             pady=(10, 0),
         )
 
-        # -------------------------
-        # Old File Conversion
-        # -------------------------
-
-        tk.Button(
-            settings_frame,
-            text="Convert Original Excel Sheet to JSON data for new Tool_Logger.xslx file",
-            command=self.convert_item_master,
-        ).pack(
-            anchor="w",
-            pady=(10, 0),
-        )
 
 
     def convert_item_master(self):

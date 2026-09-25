@@ -651,6 +651,27 @@ def build_overview_rows(purchases):
 
     rows[6][10] = "=I8-I4"
 
+    # ------------------------------------------------
+    # Storefront Sales Volume
+    #
+    # H10:I10 = section header
+    # H11:I13 = labels
+    # I11:I13 = values
+    # ------------------------------------------------
+
+    while len(rows) < 13:
+        rows.append([""] * 11)
+
+    rows[8][7] = "Purchase Platform Volume"
+
+    rows[9][7] = "Ebay Sales"
+    rows[10][7] = "WhatNot Sales"
+    rows[11][7] = "Facebook Sales"
+
+    rows[9][8] = f'=COUNTIF($C$2:$C${purchase_end_row},"Ebay")'
+    rows[10][8] = f'=COUNTIF($C$2:$C${purchase_end_row},"Whatnot")'
+    rows[11][8] = f'=COUNTIF($C$2:$C${purchase_end_row},"Facebook")'
+
     return rows
 
 

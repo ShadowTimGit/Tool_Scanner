@@ -856,7 +856,7 @@ class CameraProcessor:
         # -------------------------
 
         submit_json(
-            json_filepath
+            absolute_json2_path
         )
 
         self.crop_number += 1
@@ -1490,6 +1490,15 @@ class CameraProcessor:
             json_filename,
         )
 
+        abs_filepath = os.path.abs(
+            filepath
+        )
+
+
+        absjson_filepath = os.path.abs(
+            json_filepath
+        )
+
         metadata = {
             "Tool Name": self.tool,
             "Size-1": self.size_1,
@@ -1508,12 +1517,8 @@ class CameraProcessor:
             "Profit": self.profit,
             "Date": today.strftime("%Y-%m-%d"),
             "Inventory Type": self.inventory_type,
-            "File Path to Image": os.path.abspath(
-                filepath,
-            ),
-            "File Path to JSON": os.path.abspath(
-                json_filepath,
-            ),
+            "File Path to Image": abs_filepath,
+            "File Path to JSON": absjson_filepath,
         }
 
         try:
@@ -1541,7 +1546,7 @@ class CameraProcessor:
         # -------------------------
 
         submit_json(
-            json_filepath
+            absjson_filepath
         )
 
         self.crop_number += 1

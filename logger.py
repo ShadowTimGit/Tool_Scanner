@@ -20,98 +20,47 @@ def process_json_file(
         f"Processing: {json_path}"
     )
 
-    try:
-        with open(
-            json_path,
-            "r",
-            encoding="utf-8",
-        ) as file:
-            data = json.load(file)
-
-    except (
-        OSError,
-        json.JSONDecodeError,
-    ) as error:
-        print(
-            f"  Failed to read JSON: "
-            f"{error}"
+    if not os.path.exists(json_path):
+        alternate_path = json_path.replace(
+            "_Logged.json",
+            "_Unlogged.json",
         )
-        return False
 
-    if not isinstance(
-        data,
-        dict,
-    ):
-        print(
-            "  Invalid JSON structure."
-        )
-        return False
+        if os.path.exists(alternate_path):
+            json_path = alternate_path
+
+    with open(
+        json_path,
+        "r",
+        encoding="utf-8",
+    ) as file:
+        data = json.load(file)
 
     row_data = extract_tool_info(
         data,
     )
-
-    if row_data is None:
-        print(
-            "  Could not determine "
-            "tool information."
-        )
-        return False
-
-    # ------------------------------------------------
-    # Save to spreadsheet
-    # ------------------------------------------------
-
-    try:
-        log_path = save_to_spreadsheet(
-            row_data
-        )
-
-    except Exception as error:
-        print(
-            f"  Failed to save spreadsheet: "
-            f"{error}"
-        )
-        return False
-
-    # ------------------------------------------------
-    # Rename JSON
-    # ------------------------------------------------
 
     logged_path = json_path.replace(
         "_Unlogged.json",
         "_Logged.json",
     )
 
-    if logged_path == json_path:
-        print(
-            "  JSON filename does not "
-            "contain _Unlogged."
-        )
-        return False
-
-    try:
+    if logged_path != json_path:
         os.rename(
             json_path,
             logged_path,
         )
 
-    except OSError as error:
-        print(
-            f"  Failed to rename JSON: "
-            f"{error}"
-        )
-        return False
+        json_path = logged_path
 
-    print(
-        f"  Logged: {log_path}"
+    row_data["File Path to JSON"] = json_path
+
+    log_path = save_to_spreadsheet(
+        row_data
     )
 
     print(
-        f"  Renamed: "
-        f"{os.path.basename(json_path)} "
-        f"-> "
-        f"{os.path.basename(logged_path)}"
+        f"  Logged: {log_path}"
     )
 
     return True
