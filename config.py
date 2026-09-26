@@ -42,7 +42,7 @@ CONFIDENCE = 0.50
 
 # Model to start with
 # Use the lighter nano model by default to reduce CPU load in live detection.
-MODEL = "yolo11n.pt"
+MODEL = "yolo11s.pt"
 
 # ==================================================
 # Default Scan Dot Settings

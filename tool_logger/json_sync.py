@@ -728,6 +728,7 @@ def create_new_json_path(
 # Sync JSON From Workbook
 # =========================================================
 
+
 def sync_json_from_workbook():
 
     workbook_path = get_workbook_path()
@@ -749,6 +750,15 @@ def sync_json_from_workbook():
     updated_count = 0
     created_count = 0
     skipped_count = 0
+
+    # ---------------------------------------------------------
+    # Track JSON files already processed during this sync.
+    #
+    # This prevents multiple workbook rows from resolving to
+    # and modifying the same JSON file.
+    # ---------------------------------------------------------
+
+    processed_json_paths = set()
 
     sheets = (
         (
@@ -872,25 +882,23 @@ def sync_json_from_workbook():
                     )
                 )
 
-                if not stored_json_path and json_column <= len(row_values):
+                if (
+                    not stored_json_path
+                    and json_column <= len(row_values)
+                ):
+
                     json_cell_value = row_values[
                         json_column - 1
                     ]
 
                     if json_cell_value is not None:
+
                         stored_json_path = str(
                             json_cell_value
                         ).strip()
 
                 # -------------------------------------------------
                 # Resolve existing JSON.
-                #
-                # This now:
-                #
-                # 1. Checks the stored absolute path.
-                # 2. Checks relative paths.
-                # 3. Checks INPUT_ROOT.
-                # 4. Searches INPUT_ROOT by filename.
                 # -------------------------------------------------
 
                 json_path = (
@@ -900,13 +908,33 @@ def sync_json_from_workbook():
                 )
 
                 # -------------------------------------------------
-                # JSON path cannot be resolved.
-                #
-                # Create a new one only after all existing-path
-                # checks fail.
+                # Normalize the resolved path so that the same
+                # file cannot be processed twice even if its
+                # path differs by case or relative/absolute form.
                 # -------------------------------------------------
 
-                if not json_path:
+                normalized_json_path = None
+
+                if json_path:
+
+                    normalized_json_path = os.path.normcase(
+                        os.path.abspath(
+                            json_path
+                        )
+                    )
+
+                # -------------------------------------------------
+                # If this JSON file was already processed during
+                # this sync, do NOT reuse it.
+                #
+                # Generate a new JSON path for this workbook row.
+                # -------------------------------------------------
+
+                if (
+                    not json_path
+                    or normalized_json_path
+                    in processed_json_paths
+                ):
 
                     json_path = (
                         create_new_json_path(
@@ -917,16 +945,20 @@ def sync_json_from_workbook():
                         )
                     )
 
-                    print(
-                        "JSON missing. "
-                        f"Saving new JSON to: {json_path}"
+                    normalized_json_path = os.path.normcase(
+                        os.path.abspath(
+                            json_path
+                        )
                     )
 
-                else:
+                # -------------------------------------------------
+                # Mark this JSON path as processed BEFORE doing
+                # any read/write operations.
+                # -------------------------------------------------
 
-                    print(
-                        f"JSON found: {json_path}"
-                    )
+                processed_json_paths.add(
+                    normalized_json_path
+                )
 
                 # -------------------------------------------------
                 # Build workbook JSON data.
@@ -944,9 +976,7 @@ def sync_json_from_workbook():
                 )
 
                 # -------------------------------------------------
-                # Do not use the workbook's potentially stale
-                # path as JSON data. Store the actual resolved
-                # path.
+                # Store the actual resolved path.
                 # -------------------------------------------------
 
                 workbook_data[
@@ -991,24 +1021,10 @@ def sync_json_from_workbook():
 
                         created_count += 1
 
-                        print(
-                            f"JSON created: "
-                            f"{json_path}"
-                        )
-
                     except (
                         OSError,
                         TypeError,
-                    ) as error:
-
-                        print(
-                            "Failed to create JSON: "
-                            f"{json_path}"
-                        )
-
-                        print(
-                            f"  {error}"
-                        )
+                    ):
 
                         skipped_count += 1
 
@@ -1019,11 +1035,6 @@ def sync_json_from_workbook():
                 # -------------------------------------------------
 
                 else:
-
-                    print(
-                        f"Comparing JSON: "
-                        f"{json_path}"
-                    )
 
                     try:
 
@@ -1040,16 +1051,7 @@ def sync_json_from_workbook():
                     except (
                         OSError,
                         json.JSONDecodeError,
-                    ) as error:
-
-                        print(
-                            "Failed to read JSON: "
-                            f"{json_path}"
-                        )
-
-                        print(
-                            f"  {error}"
-                        )
+                    ):
 
                         skipped_count += 1
 
@@ -1059,11 +1061,6 @@ def sync_json_from_workbook():
                         existing_data,
                         dict,
                     ):
-
-                        print(
-                            "Invalid JSON structure: "
-                            f"{json_path}"
-                        )
 
                         skipped_count += 1
 
@@ -1081,6 +1078,40 @@ def sync_json_from_workbook():
                     )
 
                     if changed:
+
+                        differences = []
+
+                        all_keys = (
+                            set(existing_data)
+                            | set(workbook_data)
+                        )
+
+                        for key in sorted(
+                            all_keys,
+                            key=str,
+                        ):
+
+                            old_value = (
+                                existing_data.get(
+                                    key
+                                )
+                            )
+
+                            new_value = (
+                                workbook_data.get(
+                                    key
+                                )
+                            )
+
+                            if old_value != new_value:
+
+                                differences.append(
+                                    (
+                                        key,
+                                        old_value,
+                                        new_value,
+                                    )
+                                )
 
                         try:
 
@@ -1104,36 +1135,29 @@ def sync_json_from_workbook():
                                 f"{json_path}"
                             )
 
+                            for (
+                                key,
+                                old_value,
+                                new_value,
+                            ) in differences:
+
+                                print(
+                                    f"  {key}: "
+                                    f"{old_value!r} -> "
+                                    f"{new_value!r}"
+                                )
+
                         except (
                             OSError,
                             TypeError,
-                        ) as error:
-
-                            print(
-                                "Failed to update JSON: "
-                                f"{json_path}"
-                            )
-
-                            print(
-                                f"  {error}"
-                            )
+                        ):
 
                             skipped_count += 1
 
                             continue
 
-                    else:
-
-                        print(
-                            f"JSON unchanged: "
-                            f"{json_path}"
-                        )
-
                 # -------------------------------------------------
                 # Always repair the Excel JSON reference.
-                #
-                # Display only the filename, while the hyperlink
-                # contains the actual absolute path.
                 # -------------------------------------------------
 
                 json_cell.value = (

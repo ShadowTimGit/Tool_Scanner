@@ -1,7 +1,7 @@
-import json
 import os
 import tkinter as tk
 import tkinter.ttk as ttk
+import threading
 
 from PIL import Image, ImageTk
 from tkinter import messagebox
@@ -594,6 +594,7 @@ class RightPanelMixin:
         if not result:
             return
 
+        # Remove files immediately.
         for path in (json_path, image_path):
             if path and os.path.exists(path):
                 try:
@@ -601,6 +602,7 @@ class RightPanelMixin:
                 except OSError:
                     pass
 
+        # Remove from the in-memory recent-crops list.
         if self.camera is not None:
             recent = getattr(
                 self.camera,
@@ -615,16 +617,36 @@ class RightPanelMixin:
                 and item.get("image_path") != image_path
             ]
 
-        try:
-            remove_row_from_workbook_by_path(
-                json_path=json_path,
-                image_path=image_path,
-            )
-        except Exception as error:
-            print(
-                f"ERROR: Could not remove crop row from workbook: {error}"
-            )
+        # Refresh the UI immediately so it does not appear frozen.
+        self._recent_crop_signature = None
+        self.refresh_recent_crops()
 
+        def rebuild_workbook():
+            try:
+                remove_row_from_workbook_by_path(
+                    json_path=json_path,
+                    image_path=image_path,
+                )
+
+            except Exception as error:
+                print(
+                    f"ERROR: Could not remove crop row from workbook: {error}"
+                )
+
+            finally:
+                self.root.after(
+                    0,
+                    self._finish_remove_recent_crop,
+                )
+
+        threading.Thread(
+            target=rebuild_workbook,
+            daemon=True,
+        ).start()
+
+
+    def _finish_remove_recent_crop(self):
+        self._recent_crop_signature = None
         self.refresh_recent_crops()
 
     # ---------------------------------------------------------
@@ -673,24 +695,49 @@ class RightPanelMixin:
             self._right_panel_add_mousewheel_bindings(child)
 
     def _right_panel_mousewheel(self, event):
-        """Scroll the current active right-panel canvas."""
-        widget = self.root.winfo_containing(event.x_root, event.y_root)
+        """Scroll the active right-panel canvas, including when hovering dropdowns."""
+
+        widget = self.root.winfo_containing(
+            event.x_root,
+            event.y_root,
+        )
+
         if widget is None:
             return
 
         if not self._is_inside_right_panel(widget):
             return
 
-        if self._is_dropdown_widget(widget):
-            return
-
         target_canvas = self._get_active_right_panel_canvas(widget)
+
         if target_canvas is None:
             return
 
-        target_canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
-        return "break"
+        # ---------------------------------------------------------
+        # Dropdowns:
+        #
+        # Prevent the dropdown itself from responding to the wheel,
+        # but scroll the right-panel canvas instead.
+        # ---------------------------------------------------------
 
+        if self._is_dropdown_widget(widget):
+            target_canvas.yview_scroll(
+                -1 if event.delta > 0 else 1,
+                "units",
+            )
+            return "break"
+
+        # ---------------------------------------------------------
+        # Normal right-panel widgets
+        # ---------------------------------------------------------
+
+        target_canvas.yview_scroll(
+            -1 if event.delta > 0 else 1,
+            "units",
+        )
+
+        return "break"
+    
     def _get_active_right_panel_canvas(self, widget):
         current = widget
         while current is not None:
@@ -707,19 +754,12 @@ class RightPanelMixin:
 
     def _is_inside_right_panel(self, widget):
         current = widget
+
         while current is not None:
             if current == self.right_panel:
                 return True
+
             if current == self.right_panel_notebook:
-                return True
-            current = getattr(current, "master", None)
-        return False
-
-    def _is_inside_right_panel(self, widget):
-        current = widget
-
-        while current is not None:
-            if current == self.right_panel:
                 return True
 
             current = getattr(
@@ -747,6 +787,12 @@ class RightPanelMixin:
         while current is not None:
             if current in dropdowns:
                 return True
+
+            try:
+                if current.winfo_class() == "Listbox":
+                    return True
+            except tk.TclError:
+                pass
 
             current = getattr(
                 current,

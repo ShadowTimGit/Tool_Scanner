@@ -196,7 +196,7 @@ class CameraProcessor:
         self.crop_mode = CROP_MODE_PREVIEW
         self.require_red_for_automatic = (
             REQUIRE_RED_FOR_AUTOMATIC
-)
+        )
 
         # Objects that have already crossed
         # the counting box during the current
@@ -426,7 +426,7 @@ class CameraProcessor:
         self.drive = drive
         self.point = point
         self.specialty_socket = specialty_socket
-        self.invoice = invoice
+        self.invoice = invoice.strip() if invoice else "DEFAULT"
         self.ebay_id = ebay_id
         self.estimated_value = (
             self.get_estimated_value(
@@ -440,17 +440,21 @@ class CameraProcessor:
         self.image_date = image_date
 
     def get_capture_output_dir(self):
+        invoice = self.invoice.strip() if self.invoice else "DEFAULT"
+
         return os.path.join(
             self.output_dir,
             self.inventory_type,
-            self.invoice,
+            invoice,
             self.tool,
             self.brand,
         )
 
     def get_file_prefix(self):
+        invoice = self.invoice.strip() if self.invoice else "DEFAULT"
+
         return (
-            f"{self.invoice}_{self.tool}_{self.brand}_"
+            f"{invoice}_{self.tool}_{self.brand}_"
         )
 
     # ==================================================
@@ -851,7 +855,7 @@ class CameraProcessor:
             "Drive": self.drive,
             "Point": self.point,
             "Specialty Socket": self.specialty_socket,
-            "Invoice": self.invoice,
+            "Invoice": self.invoice.strip() if self.invoice else "DEFAULT",
             "eBay ID": self.ebay_id,
             "Part Number": self.part_number,
             "Invoice Price": self.invoice_price,
@@ -929,10 +933,7 @@ class CameraProcessor:
     # Process Frame
     # ==================================================
 
-    def process_frame(
-        self,
-        frame,
-    ):
+    def process_frame(self, frame):
         """Process one camera frame and return the display frame + detection count."""
 
         with time_block(
@@ -964,6 +965,7 @@ class CameraProcessor:
             )
 
             self._update_counting_state(objects_inside)
+
             self._draw_frame_overlay(
                 frame=frame,
                 detection_count=len(detections),
@@ -1016,8 +1018,6 @@ class CameraProcessor:
     # ==================================================
 
     def _check_red_scan(self, frame):
-        """Return whether the automatic red-scan requirement is satisfied."""
-
         if (
             self.trigger_mode != TRIGGER_AUTOMATIC
             or not self.require_red_for_automatic
@@ -1025,12 +1025,7 @@ class CameraProcessor:
         ):
             return True
 
-        with time_block(
-            "camera.red_scan",
-            scan_box=self.scan_box,
-            area_size=(frame.shape[0], frame.shape[1]),
-        ):
-            return self.has_red_in_scan_area(frame)
+        return self.has_red_in_scan_area(frame)
 
     # ==================================================
     # Tracked Object Processing
@@ -1049,13 +1044,22 @@ class CameraProcessor:
         objects_inside = set()
 
         for object_id, obj in objects.items():
+
             object_box = self._get_object_box(obj)
+
             center_inside = self.object_center_inside_counting_box(
                 object_box
             )
 
             if center_inside:
                 objects_inside.add(object_id)
+
+            # An object is considered to have entered when it is
+            # inside now but was not inside during the previous frame.
+            object_entered = (
+                center_inside
+                and object_id not in self.counting_object_ids
+            )
 
             self._draw_tracked_object(
                 frame=frame,
@@ -1069,6 +1073,7 @@ class CameraProcessor:
                 object_id=object_id,
                 obj=obj,
                 center_inside=center_inside,
+                object_entered=object_entered,
                 red_detected=red_detected,
                 current_time=current_time,
             )
@@ -1162,28 +1167,36 @@ class CameraProcessor:
         object_id,
         obj,
         center_inside,
+        object_entered,
         red_detected,
         current_time,
     ):
-        """Apply the active automatic or continuous trigger to one object."""
+        """Apply the active trigger mode to one tracked object."""
 
         if self.trigger_mode == TRIGGER_AUTOMATIC:
+
             self._handle_automatic_capture(
                 original_frame=original_frame,
                 objects=objects,
                 object_id=object_id,
                 obj=obj,
                 center_inside=center_inside,
+                object_entered=object_entered,
                 red_detected=red_detected,
                 current_time=current_time,
             )
+
             return
 
         if self.trigger_mode == TRIGGER_CONTINUOUS:
+
             self._handle_continuous_counting(
+                original_frame=original_frame,
+                objects=objects,
                 object_id=object_id,
                 obj=obj,
                 center_inside=center_inside,
+                object_entered=object_entered,
             )
 
     def _should_automatic_capture(
@@ -1191,10 +1204,16 @@ class CameraProcessor:
         object_id,
         obj,
         center_inside,
+        object_entered,
         red_detected,
         current_time,
     ):
-        """Return True when this object satisfies every automatic trigger rule."""
+        """Return True when an object has entered and satisfies
+        all automatic capture conditions.
+        """
+
+        if not object_entered:
+            return False
 
         if obj["frames"] < MIN_FRAMES:
             return False
@@ -1212,7 +1231,10 @@ class CameraProcessor:
             current_time - self.last_capture_time
         )
 
-        return time_since_capture >= CAPTURE_INTERVAL
+        if time_since_capture < CAPTURE_INTERVAL:
+            return False
+
+        return True
 
     def _handle_automatic_capture(
         self,
@@ -1221,15 +1243,17 @@ class CameraProcessor:
         object_id,
         obj,
         center_inside,
+        object_entered,
         red_detected,
         current_time,
     ):
-        """Capture an object when all automatic trigger conditions are met."""
+        """Capture once when an object enters the counting box."""
 
         if not self._should_automatic_capture(
             object_id=object_id,
             obj=obj,
             center_inside=center_inside,
+            object_entered=object_entered,
             red_detected=red_detected,
             current_time=current_time,
         ):
@@ -1257,11 +1281,19 @@ class CameraProcessor:
 
     def _handle_continuous_counting(
         self,
+        original_frame,
+        objects,
         object_id,
         obj,
         center_inside,
+        object_entered,
     ):
-        """Count an object once when its center enters the counting box."""
+        """Capture and count each tracked object once when it enters
+        the counting box.
+        """
+
+        if not object_entered:
+            return
 
         if obj["frames"] < MIN_FRAMES:
             return
@@ -1272,8 +1304,28 @@ class CameraProcessor:
         if object_id in self.processed_object_ids:
             return
 
+        if self.metadata_sync_callback:
+            self.metadata_sync_callback()
+
+        with time_block(
+            "camera.capture_continuous",
+            object_id=object_id,
+            object_count=len(objects),
+        ):
+            saved_filename = self.capture_counting_area(
+                original_frame,
+                objects,
+                object_id,
+            )
+
+        if not saved_filename:
+            return
+
         self.processed_object_ids.add(object_id)
+
         self.continuous_count += 1
+
+        obj["captured"] = True
 
     # ==================================================
     # Manual Capture
@@ -1291,7 +1343,9 @@ class CameraProcessor:
 
         self.manual_trigger_requested = False
 
-        manual_objects = self._get_manual_capture_objects(objects)
+        manual_objects = self._get_manual_capture_objects(
+            objects
+        )
 
         if manual_objects:
             self._capture_manual_objects(
@@ -1299,8 +1353,6 @@ class CameraProcessor:
                 manual_objects=manual_objects,
             )
             return
-
-        self._save_manual_snapshot(original_frame)
 
     def _get_manual_capture_objects(self, objects):
         """Return sufficiently tracked objects eligible for manual capture."""
@@ -1345,14 +1397,6 @@ class CameraProcessor:
 
         for obj in manual_objects.values():
             obj["captured"] = True
-
-    def _save_manual_snapshot(self, frame):
-        """Save a manual full-frame snapshot and sync metadata afterward."""
-
-        saved_filename = self.save_manual_snapshot(frame)
-
-        if saved_filename and self.metadata_sync_callback:
-            self.metadata_sync_callback()
 
     # ==================================================
     # Counting State
@@ -1446,12 +1490,12 @@ class CameraProcessor:
             return
 
         x1, y1, x2, y2 = self.crop_box
-
+        color_crop = (0, 255, 255)
         cv2.rectangle(
             frame,
             (x1, y1),
             (x2, y2),
-            (0, 255, 0),
+            color_crop,
             2,
         )
 
@@ -1461,7 +1505,7 @@ class CameraProcessor:
             (x1 - 10, max(y1 - 10, 20)),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
-            (0, 255, 0),
+            color_crop,
             2,
         )
 
@@ -1470,12 +1514,12 @@ class CameraProcessor:
             return
 
         x1, y1, x2, y2 = self.counting_box
-
+        color_count = (255,255,0)
         cv2.rectangle(
             frame,
             (x1, y1),
             (x2, y2),
-            (255, 0, 0),
+            color_count,
             2,
         )
 
@@ -1485,7 +1529,7 @@ class CameraProcessor:
             (x1 - 10, max(y1 - 10, 20)),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
-            (255, 0, 0),
+            color_count,
             2,
         )
 
@@ -1709,7 +1753,7 @@ class CameraProcessor:
             "Drive": self.drive,
             "Point": self.point,
             "Specialty Socket": self.specialty_socket,
-            "Invoice": self.invoice,
+            "Invoice": self.invoice.strip() if self.invoice else "DEFAULT",
             "eBay ID": self.ebay_id,
             "Part Number": self.part_number,
             "Estimated Value": self.estimated_value,

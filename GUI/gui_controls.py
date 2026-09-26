@@ -205,7 +205,7 @@ class ControlsMixin:
         )
 
         self.require_red_var = tk.BooleanVar(
-            value=True
+            value=False
         )
 
         self.require_red_check = tk.Checkbutton(
@@ -350,8 +350,8 @@ class ControlsMixin:
             values=[
                 CROP_MODE_FULL,
                 CROP_MODE_PREVIEW,
-                CROP_MODE_OBJECTS,
-                CROP_MODE_EXPANDED,
+                # CROP_MODE_OBJECTS,
+                # CROP_MODE_EXPANDED,
             ],
             state="readonly",
             width=30,
