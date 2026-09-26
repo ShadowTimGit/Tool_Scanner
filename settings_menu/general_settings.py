@@ -5,8 +5,6 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter import filedialog, messagebox
 
-from master_conversion import convert_item_master
-
 from config import (
     DEFAULT_BOX,
     DEFAULT_CROP,
@@ -786,31 +784,3 @@ class GeneralSettings:
 
         canvas.update_idletasks()
         _update_scrollregion()
-    def convert_item_master(self):
-        file_path = filedialog.askopenfilename(
-            title="Select Item Master Workbook",
-            filetypes=[
-                (
-                    "Excel Files",
-                    "*.xlsx *.xlsm *.xltx *.xltm",
-                ),
-                (
-                    "All Files",
-                    "*.*",
-                ),
-            ],
-        )
-
-        if not file_path:
-            return
-
-        try:
-            convert_item_master(
-                file_path
-            )
-
-        except Exception as error:
-            print(
-                f"ERROR: Could not convert Item Master: "
-                f"{error}"
-            )

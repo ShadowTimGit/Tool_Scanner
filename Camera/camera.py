@@ -777,22 +777,11 @@ class CameraProcessor:
 
         today = datetime.now()
 
-        year = today.strftime("%Y")
-        month = today.strftime("%m")
-        day = today.strftime("%d")
         self.output_dir = os.path.abspath(
             get_output_dir()
         )
 
-        output_dir = os.path.join(
-            self.output_dir,
-            self.inventory_type,
-            self.tool,
-            self.brand,
-            year,
-            month,
-            day,
-        )
+        output_dir = self.get_capture_output_dir()
 
         os.makedirs(
             output_dir,
@@ -804,9 +793,10 @@ class CameraProcessor:
         if crop_number is None:
             return None
 
+        prefix = self.get_file_prefix()
+
         filename = (
-            f"{self.tool}_{self.brand}_"
-            f"{crop_number:03d}_Unlogged.jpg"
+            f"{prefix}{crop_number:03d}_Unlogged.jpg"
         )
 
         filepath = os.path.join(
@@ -822,32 +812,20 @@ class CameraProcessor:
         # -------------------------
 
         json_filename = (
-            f"{self.tool}_{self.brand}_"
-            f"{crop_number:03d}_Unlogged.json"
+            f"{prefix}{crop_number:03d}_Logged.json"
         )
-
-        json_filename2 = (
-            f"{self.tool}_{self.brand}_"
-            f"{crop_number:03d}_Logged.json"
-        )
-
 
         json_filepath = os.path.join(
             output_dir,
             json_filename,
         )
 
-        json_filepath2 = os.path.join(
-            output_dir,
-            json_filename2,
-        )
-
         absolute_image_path = os.path.abspath(
             filepath,
         )
 
-        absolute_json2_path = os.path.abspath(
-            json_filepath2,
+        absolute_json_path = os.path.abspath(
+            json_filepath,
         )
 
         metadata = {
@@ -866,11 +844,11 @@ class CameraProcessor:
             "Date": today.strftime("%Y-%m-%d"),
             "Inventory Type": self.inventory_type,
             "File Path to Image": absolute_image_path,
-            "File Path to JSON": absolute_json2_path,
+            "File Path to JSON": absolute_json_path,
         }
 
         session_entry = {
-            "json_path": absolute_json2_path,
+            "json_path": absolute_json_path,
             "image_path": absolute_image_path,
             "tool_name": self.tool,
             "brand_name": self.brand,
@@ -916,7 +894,7 @@ class CameraProcessor:
         # -------------------------
 
         submit_json(
-            absolute_json2_path
+            absolute_json_path
         )
 
         self.crop_number += 1
@@ -1381,7 +1359,21 @@ class CameraProcessor:
                 len(detections),
             )
 
-    
+
+    def get_capture_output_dir(self):
+        return os.path.join(
+            self.output_dir,
+            self.inventory_type,
+            self.invoice,
+            self.tool,
+            self.brand,
+        )
+
+    def get_file_prefix(self):
+        return (
+            f"{self.invoice}_{self.tool}_{self.brand}_"
+        )
+
     # ==================================================
     # Tool Number
     # ==================================================
@@ -1391,28 +1383,15 @@ class CameraProcessor:
         if not self.tool or not self.brand:
             return None
 
-        today = datetime.now()
-
-        year = today.strftime("%Y")
-        month = today.strftime("%m")
-        day = today.strftime("%d")
         self.output_dir = os.path.abspath(
             get_output_dir()
         )
 
-        output_dir = os.path.join(
-            self.output_dir,
-            self.inventory_type,
-            self.tool,
-            self.brand,
-            year,
-            month,
-            day,
-        )
+        output_dir = self.get_capture_output_dir()
 
         os.makedirs(output_dir, exist_ok=True)
 
-        prefix = f"{self.tool}_{self.brand}_"
+        prefix = self.get_file_prefix()
 
         existing_files = [
             f for f in os.listdir(output_dir)
@@ -1558,22 +1537,11 @@ class CameraProcessor:
 
         today = datetime.now()
 
-        year = today.strftime("%Y")
-        month = today.strftime("%m")
-        day = today.strftime("%d")
         self.output_dir = os.path.abspath(
             get_output_dir()
         )
 
-        output_dir = os.path.join(
-            self.output_dir,
-            self.inventory_type,
-            self.tool,
-            self.brand,
-            year,
-            month,
-            day,
-        )
+        output_dir = self.get_capture_output_dir()
 
         os.makedirs(
             output_dir,
@@ -1585,9 +1553,10 @@ class CameraProcessor:
         if crop_number is None:
             return None
 
+        prefix = self.get_file_prefix()
+
         filename = (
-            f"{self.invoice}_{self.tool}_{self.brand}_"
-            f"{crop_number:03d}_Unlogged.jpg"
+            f"{prefix}{crop_number:03d}_Unlogged.jpg"
         )
 
         filepath = os.path.join(
@@ -1595,16 +1564,12 @@ class CameraProcessor:
             filename,
         )
 
-        if not cv2.imwrite(filepath, original):
-            return None
-
         # -------------------------
         # Save raw metadata JSON
         # -------------------------
 
         json_filename = (
-            f"{self.tool}_{self.brand}_"
-            f"{crop_number:03d}_Unlogged.json"
+            f"{prefix}{crop_number:03d}_Logged.json"
         )
 
         json_filepath = os.path.join(
@@ -1612,12 +1577,12 @@ class CameraProcessor:
             json_filename,
         )
 
-        abs_filepath = os.path.abspath(
-            filepath
+        absolute_image_path = os.path.abspath(
+            filepath,
         )
 
-        absjson_filepath = os.path.abspath(
-            json_filepath
+        absolute_json_path = os.path.abspath(
+            json_filepath,
         )
 
         metadata = {
@@ -1638,8 +1603,8 @@ class CameraProcessor:
             "Profit": self.profit,
             "Date": today.strftime("%Y-%m-%d"),
             "Inventory Type": self.inventory_type,
-            "File Path to Image": abs_filepath,
-            "File Path to JSON": absjson_filepath,
+            "File Path to Image": absolute_image_path,
+            "File Path to JSON": absolute_json_path,
         }
 
         try:
@@ -1667,7 +1632,7 @@ class CameraProcessor:
         # -------------------------
 
         submit_json(
-            absjson_filepath
+            absolute_json_path
         )
 
         self.crop_number += 1
