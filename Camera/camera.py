@@ -439,6 +439,20 @@ class CameraProcessor:
         self.profit = profit
         self.image_date = image_date
 
+    def get_capture_output_dir(self):
+        return os.path.join(
+            self.output_dir,
+            self.inventory_type,
+            self.invoice,
+            self.tool,
+            self.brand,
+        )
+
+    def get_file_prefix(self):
+        return (
+            f"{self.invoice}_{self.tool}_{self.brand}_"
+        )
+
     # ==================================================
     # Settings
     # ==================================================
@@ -919,6 +933,7 @@ class CameraProcessor:
         self,
         frame,
     ):
+        """Process one camera frame and return the display frame + detection count."""
 
         with time_block(
             "camera.process_frame",
@@ -929,449 +944,549 @@ class CameraProcessor:
 
             original_frame = frame.copy()
 
-            now = time.monotonic()
-            should_detect = (
-                now - self.last_detection_time
-                >= self.detection_interval
-                or not self.tracker.objects
+            detections = self._detect_objects(frame)
+            objects = self._update_tracked_objects(detections)
+
+            current_time = self._get_current_capture_time()
+            red_detected = self._check_red_scan(original_frame)
+
+            objects_inside = self._process_tracked_objects(
+                frame=frame,
+                original_frame=original_frame,
+                objects=objects,
+                red_detected=red_detected,
+                current_time=current_time,
             )
 
-            if should_detect:
-                with time_block(
-                    "camera.detect",
-                    trigger_mode=self.trigger_mode,
-                ):
-                    detections = self.tracker.detect(frame)
-                self.last_detection_time = now
-            else:
-                detections = []
+            self._handle_manual_capture(
+                original_frame=original_frame,
+                objects=objects,
+            )
 
-            with time_block(
-                "camera.update_objects",
+            self._update_counting_state(objects_inside)
+            self._draw_frame_overlay(
+                frame=frame,
                 detection_count=len(detections),
-            ):
-                objects = self.tracker.update(
-                    detections
-                )
-
-            current_time = (
-                cv2.getTickCount()
-                / cv2.getTickFrequency()
             )
 
-            red_detected = True
+            return frame, len(detections)
+
+    # ==================================================
+    # Detection / Tracking
+    # ==================================================
+
+    def _detect_objects(self, frame):
+        """Run object detection only when the detection interval allows it."""
+
+        now = time.monotonic()
+        should_detect = (
+            now - self.last_detection_time >= self.detection_interval
+            or not self.tracker.objects
+        )
+
+        if not should_detect:
+            return []
+
+        with time_block(
+            "camera.detect",
+            trigger_mode=self.trigger_mode,
+        ):
+            detections = self.tracker.detect(frame)
+
+        self.last_detection_time = now
+        return detections
+
+    def _update_tracked_objects(self, detections):
+        """Update the tracker using the latest detections."""
+
+        with time_block(
+            "camera.update_objects",
+            detection_count=len(detections),
+        ):
+            return self.tracker.update(detections)
+
+    def _get_current_capture_time(self):
+        return (
+            cv2.getTickCount()
+            / cv2.getTickFrequency()
+        )
+
+    # ==================================================
+    # Automatic Scan / Red Detection
+    # ==================================================
+
+    def _check_red_scan(self, frame):
+        """Return whether the automatic red-scan requirement is satisfied."""
+
+        if (
+            self.trigger_mode != TRIGGER_AUTOMATIC
+            or not self.require_red_for_automatic
+            or self.scan_box is None
+        ):
+            return True
+
+        with time_block(
+            "camera.red_scan",
+            scan_box=self.scan_box,
+            area_size=(frame.shape[0], frame.shape[1]),
+        ):
+            return self.has_red_in_scan_area(frame)
+
+    # ==================================================
+    # Tracked Object Processing
+    # ==================================================
+
+    def _process_tracked_objects(
+        self,
+        frame,
+        original_frame,
+        objects,
+        red_detected,
+        current_time,
+    ):
+        """Evaluate each tracked object for drawing, capture, or counting."""
+
+        objects_inside = set()
+
+        for object_id, obj in objects.items():
+            object_box = self._get_object_box(obj)
+            center_inside = self.object_center_inside_counting_box(
+                object_box
+            )
+
+            if center_inside:
+                objects_inside.add(object_id)
+
+            self._draw_tracked_object(
+                frame=frame,
+                object_id=object_id,
+                obj=obj,
+            )
+
+            self._handle_object_capture_or_count(
+                original_frame=original_frame,
+                objects=objects,
+                object_id=object_id,
+                obj=obj,
+                center_inside=center_inside,
+                red_detected=red_detected,
+                current_time=current_time,
+            )
+
+        return objects_inside
+
+    def _get_object_box(self, obj):
+        """Convert a tracker object into [x1, y1, x2, y2]."""
+
+        return [
+            obj["x"],
+            obj["y"],
+            obj["x"] + obj["w"],
+            obj["y"] + obj["h"],
+        ]
+
+    def _draw_tracked_object(
+        self,
+        frame,
+        object_id,
+        obj,
+    ):
+        """Draw the tracking box, center point, ID, and tracking state."""
+
+        x = obj["x"]
+        y = obj["y"]
+        w = obj["w"]
+        h = obj["h"]
+
+        # Keep the visual overlay active as soon as an object is tracked,
+        # even before it reaches MIN_FRAMES.
+        if (
+            obj["frames"] < MIN_FRAMES
+            and obj.get("missed_frames", 0) > MAX_MISSED_FRAMES
+        ):
+            return
+
+        cv2.rectangle(
+            frame,
+            (x, y),
+            (x + w, y + h),
+            (0, 255, 0),
+            2,
+        )
+
+        center_x = x + (w // 2)
+        center_y = y + (h // 2)
+
+        cv2.circle(
+            frame,
+            (center_x, center_y),
+            5,
+            (0, 0, 255),
+            -1,
+        )
+
+        cv2.putText(
+            frame,
+            f"ID: {object_id}",
+            (x, max(y - 25, 20)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 0),
+            2,
+        )
+
+        label = (
+            f"Frames: {obj['frames']}"
+            if obj["frames"] >= MIN_FRAMES
+            else "Tracking"
+        )
+
+        cv2.putText(
+            frame,
+            label,
+            (x, max(y - 5, 40)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (255, 255, 0),
+            1,
+        )
+
+    # ==================================================
+    # Automatic Capture / Continuous Counting
+    # ==================================================
+
+    def _handle_object_capture_or_count(
+        self,
+        original_frame,
+        objects,
+        object_id,
+        obj,
+        center_inside,
+        red_detected,
+        current_time,
+    ):
+        """Apply the active automatic or continuous trigger to one object."""
+
+        if self.trigger_mode == TRIGGER_AUTOMATIC:
+            self._handle_automatic_capture(
+                original_frame=original_frame,
+                objects=objects,
+                object_id=object_id,
+                obj=obj,
+                center_inside=center_inside,
+                red_detected=red_detected,
+                current_time=current_time,
+            )
+            return
+
+        if self.trigger_mode == TRIGGER_CONTINUOUS:
+            self._handle_continuous_counting(
+                object_id=object_id,
+                obj=obj,
+                center_inside=center_inside,
+            )
+
+    def _should_automatic_capture(
+        self,
+        object_id,
+        obj,
+        center_inside,
+        red_detected,
+        current_time,
+    ):
+        """Return True when this object satisfies every automatic trigger rule."""
+
+        if obj["frames"] < MIN_FRAMES:
+            return False
+
+        if not center_inside:
+            return False
+
+        if not red_detected:
+            return False
+
+        if object_id in self.processed_object_ids:
+            return False
+
+        time_since_capture = (
+            current_time - self.last_capture_time
+        )
+
+        return time_since_capture >= CAPTURE_INTERVAL
+
+    def _handle_automatic_capture(
+        self,
+        original_frame,
+        objects,
+        object_id,
+        obj,
+        center_inside,
+        red_detected,
+        current_time,
+    ):
+        """Capture an object when all automatic trigger conditions are met."""
+
+        if not self._should_automatic_capture(
+            object_id=object_id,
+            obj=obj,
+            center_inside=center_inside,
+            red_detected=red_detected,
+            current_time=current_time,
+        ):
+            return
+
+        if self.metadata_sync_callback:
+            self.metadata_sync_callback()
+
+        with time_block(
+            "camera.capture_counting_area",
+            object_id=object_id,
+            object_count=len(objects),
+        ):
+            saved_filename = self.capture_counting_area(
+                original_frame,
+                objects,
+                object_id,
+            )
+
+        if not saved_filename:
+            return
+
+        self.processed_object_ids.add(object_id)
+        obj["captured"] = True
+
+    def _handle_continuous_counting(
+        self,
+        object_id,
+        obj,
+        center_inside,
+    ):
+        """Count an object once when its center enters the counting box."""
+
+        if obj["frames"] < MIN_FRAMES:
+            return
+
+        if not center_inside:
+            return
+
+        if object_id in self.processed_object_ids:
+            return
+
+        self.processed_object_ids.add(object_id)
+        self.continuous_count += 1
+
+    # ==================================================
+    # Manual Capture
+    # ==================================================
+
+    def _handle_manual_capture(
+        self,
+        original_frame,
+        objects,
+    ):
+        """Handle a pending manual capture request."""
+
+        if not self.manual_trigger_requested:
+            return
+
+        self.manual_trigger_requested = False
+
+        manual_objects = self._get_manual_capture_objects(objects)
+
+        if manual_objects:
+            self._capture_manual_objects(
+                original_frame=original_frame,
+                manual_objects=manual_objects,
+            )
+            return
+
+        self._save_manual_snapshot(original_frame)
+
+    def _get_manual_capture_objects(self, objects):
+        """Return sufficiently tracked objects eligible for manual capture."""
+
+        manual_objects = {}
+
+        for object_id, obj in objects.items():
+            if obj["frames"] < MIN_FRAMES:
+                continue
+
+            object_box = self._get_object_box(obj)
+
             if (
-                self.trigger_mode == TRIGGER_AUTOMATIC
-                and self.require_red_for_automatic
-                and self.scan_box is not None
+                not self.show_counting_box
+                or self.object_center_inside_counting_box(object_box)
             ):
-                with time_block(
-                    "camera.red_scan",
-                    scan_box=self.scan_box,
-                    area_size=(original_frame.shape[0], original_frame.shape[1]),
-                ):
-                    red_detected = self.has_red_in_scan_area(original_frame)
+                manual_objects[object_id] = obj
 
-            objects_inside = set()
+        return manual_objects
 
-            # --------------------------------------------------
-            # Process tracked objects
-            # --------------------------------------------------
+    def _capture_manual_objects(
+        self,
+        original_frame,
+        manual_objects,
+    ):
+        """Capture all objects currently eligible for a manual capture."""
 
-            for object_id, obj in objects.items():
+        if self.metadata_sync_callback:
+            self.metadata_sync_callback()
 
-                x = obj["x"]
-                y = obj["y"]
-                w = obj["w"]
-                h = obj["h"]
-
-                object_box = [
-                    x,
-                    y,
-                    x + w,
-                    y + h,
-                ]
-
-                center_inside = (
-                    self.object_center_inside_counting_box(
-                        object_box
-                    )
-                )
-
-                if center_inside:
-                    objects_inside.add(object_id)
-
-                # --------------------------------------------------
-                # Draw object
-                #
-                # Keep the visual overlay active as soon as an object is
-                # tracked, even before it reaches MIN_FRAMES. The capture
-                # and counting rules still use MIN_FRAMES, but the user
-                # should see the box immediately while the tracker is
-                # actively following it.
-                # --------------------------------------------------
-
-                if (
-                    obj["frames"] >= MIN_FRAMES
-                    or obj.get("missed_frames", 0)
-                    <= MAX_MISSED_FRAMES
-                ):
-
-                    cv2.rectangle(
-                        frame,
-                        (x, y),
-                        (x + w, y + h),
-                        (0, 255, 0),
-                        2,
-                    )
-
-                    center_x = x + (w // 2)
-                    center_y = y + (h // 2)
-
-                    cv2.circle(
-                        frame,
-                        (center_x, center_y),
-                        5,
-                        (0, 0, 255),
-                        -1,
-                    )
-
-                    cv2.putText(
-                        frame,
-                        f"ID: {object_id}",
-                        (
-                            x,
-                            max(y - 25, 20),
-                        ),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6,
-                        (0, 255, 0),
-                        2,
-                    )
-
-                    label = (
-                        "Frames: {}".format(obj["frames"])
-                        if obj["frames"] >= MIN_FRAMES
-                        else "Tracking"
-                    )
-
-                    cv2.putText(
-                        frame,
-                        label,
-                        (
-                            x,
-                            max(y - 5, 40),
-                        ),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (255, 255, 0),
-                        1,
-                    )
-
-                # --------------------------------------------------
-                # Automatic capture
-                #
-                # Only capture when:
-                # - automatic mode is active
-                # - object has enough tracking frames
-                # - object center is inside counting box
-                # - red scan condition is satisfied
-                # - object has not already been processed
-                # - capture interval has elapsed
-                # --------------------------------------------------
-
-                if (
-                    self.trigger_mode == TRIGGER_AUTOMATIC
-                    and obj["frames"] >= MIN_FRAMES
-                    and center_inside
-                    and red_detected
-                    and object_id not in self.processed_object_ids
-                ):
-
-                    time_since_capture = (
-                        current_time
-                        - self.last_capture_time
-                    )
-
-                    if time_since_capture >= CAPTURE_INTERVAL:
-                        if self.metadata_sync_callback:
-                            self.metadata_sync_callback()
-
-                        with time_block(
-                            "camera.capture_counting_area",
-                            object_id=object_id,
-                            object_count=len(objects),
-                        ):
-                            saved_filename = (
-                                self.capture_counting_area(
-                                    original_frame,
-                                    objects,
-                                    object_id,
-                                )
-                            )
-
-                        if saved_filename:
-
-                            self.processed_object_ids.add(
-                                object_id
-                            )
-
-                            obj["captured"] = True
-
-                # --------------------------------------------------
-                # Continuous counting
-                #
-                # Count an object exactly once when its center
-                # enters the counting box.
-                # --------------------------------------------------
-
-                elif (
-                    self.trigger_mode == TRIGGER_CONTINUOUS
-                    and obj["frames"] >= MIN_FRAMES
-                    and center_inside
-                    and object_id not in self.processed_object_ids
-                ):
-
-                    self.processed_object_ids.add(
-                        object_id
-                    )
-
-                    self.continuous_count += 1
-
-            # --------------------------------------------------
-            # Manual capture
-            #
-            # Counts/captures every object whose center is
-            # currently inside the counting box.
-            # --------------------------------------------------
-
-            if self.manual_trigger_requested:
-
-                self.manual_trigger_requested = False
-
-                manual_objects = {}
-
-                for object_id, obj in objects.items():
-
-                    if obj["frames"] < MIN_FRAMES:
-                        continue
-
-                    box = [
-                        obj["x"],
-                        obj["y"],
-                        obj["x"] + obj["w"],
-                        obj["y"] + obj["h"],
-                    ]
-
-                    if (
-                        not self.show_counting_box
-                        or self.object_center_inside_counting_box(box)
-                    ):
-                        manual_objects[object_id] = obj
-
-                if manual_objects:
-
-                    if self.metadata_sync_callback:
-                        self.metadata_sync_callback()
-
-                    with time_block(
-                        "camera.capture_manual",
-                        object_count=len(manual_objects),
-                    ):
-                        saved_filename = (
-                            self.capture_counting_area(
-                                original_frame,
-                                manual_objects,
-                            )
-                        )
-
-                    if saved_filename:
-
-                        for object_id in manual_objects:
-
-                            manual_objects[
-                                object_id
-                            ]["captured"] = True
-
-                else:
-                    saved_filename = self.save_manual_snapshot(
-                        original_frame
-                    )
-
-                    if saved_filename and self.metadata_sync_callback:
-                        self.metadata_sync_callback()
-
-            # --------------------------------------------------
-            # Reset processed IDs after objects leave the
-            # counting box.
-            #
-            # This allows an object to be processed again only
-            # after it has actually left and then re-entered.
-            # --------------------------------------------------
-
-            objects_that_left = (
-                self.counting_object_ids
-                - objects_inside
+        with time_block(
+            "camera.capture_manual",
+            object_count=len(manual_objects),
+        ):
+            saved_filename = self.capture_counting_area(
+                original_frame,
+                manual_objects,
             )
 
-            self.processed_object_ids.difference_update(
-                objects_that_left
-            )
+        if not saved_filename:
+            return
 
-            self.counting_object_ids = objects_inside
+        for obj in manual_objects.values():
+            obj["captured"] = True
 
-            # --------------------------------------------------
-            # Detection count
-            # --------------------------------------------------
+    def _save_manual_snapshot(self, frame):
+        """Save a manual full-frame snapshot and sync metadata afterward."""
 
+        saved_filename = self.save_manual_snapshot(frame)
+
+        if saved_filename and self.metadata_sync_callback:
+            self.metadata_sync_callback()
+
+    # ==================================================
+    # Counting State
+    # ==================================================
+
+    def _update_counting_state(self, objects_inside):
+        """Allow processed objects to be processed again after leaving the box."""
+
+        objects_that_left = (
+            self.counting_object_ids
+            - objects_inside
+        )
+
+        self.processed_object_ids.difference_update(
+            objects_that_left
+        )
+
+        self.counting_object_ids = objects_inside
+
+    # ==================================================
+    # Frame Overlay
+    # ==================================================
+
+    def _draw_frame_overlay(
+        self,
+        frame,
+        detection_count,
+    ):
+        """Draw counters and configured camera boxes on the display frame."""
+
+        self._draw_detection_count(
+            frame,
+            detection_count,
+        )
+        self._draw_scan_box(frame)
+        self._draw_crop_box(frame)
+        self._draw_counting_box(frame)
+
+    def _draw_detection_count(
+        self,
+        frame,
+        detection_count,
+    ):
+        cv2.putText(
+            frame,
+            f"Objects: {detection_count}",
+            (20, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 255, 255),
+            2,
+        )
+
+        if self.trigger_mode == TRIGGER_CONTINUOUS:
             cv2.putText(
                 frame,
-                f"Objects: {len(detections)}",
-                (20, 30),
+                f"Count: {self.continuous_count}",
+                (20, 60),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
                 (0, 255, 255),
                 2,
             )
 
-            if self.trigger_mode == TRIGGER_CONTINUOUS:
+    def _draw_scan_box(self, frame):
+        if self.scan_box is None:
+            return
 
-                cv2.putText(
-                    frame,
-                    f"Count: {self.continuous_count}",
-                    (20, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    (0, 255, 255),
-                    2,
-                )
+        x1, y1, x2, y2 = self.scan_box
 
-            # --------------------------------------------------
-            # Scan box
-            # --------------------------------------------------
-
-            if self.scan_box is not None:
-
-                (
-                    box_x1,
-                    box_y1,
-                    box_x2,
-                    box_y2,
-                ) = self.scan_box
-
-                cv2.rectangle(
-                    frame,
-                    (box_x1, box_y1),
-                    (box_x2, box_y2),
-                    (255, 0, 255),
-                    2,
-                )
-
-                cv2.putText(
-                    frame,
-                    "Scan Dot",
-                    (
-                        box_x1 - 10,
-                        max(box_y1 - 10, 20),
-                    ),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (255, 0, 255),
-                    2,
-                )
-
-            # --------------------------------------------------
-            # Preview Crop box
-            # --------------------------------------------------
-
-            if (
-                self.crop_box is not None
-                and self.show_crop_box
-            ):
-
-                (
-                    crop_x1,
-                    crop_y1,
-                    crop_x2,
-                    crop_y2,
-                ) = self.crop_box
-
-                cv2.rectangle(
-                    frame,
-                    (crop_x1, crop_y1),
-                    (crop_x2, crop_y2),
-                    (0, 255, 0),
-                    2,
-                )
-
-                cv2.putText(
-                    frame,
-                    "Preview Crop",
-                    (
-                        crop_x1 - 10,
-                        max(crop_y1 - 10, 20),
-                    ),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 255, 0),
-                    2,
-                )
-
-            # --------------------------------------------------
-            # Counting box
-            # --------------------------------------------------
-
-            if (
-                self.counting_box is not None
-                and self.show_counting_box
-            ):
-
-                (
-                    counting_x1,
-                    counting_y1,
-                    counting_x2,
-                    counting_y2,
-                ) = self.counting_box
-
-                cv2.rectangle(
-                    frame,
-                    (counting_x1, counting_y1),
-                    (counting_x2, counting_y2),
-                    (255, 0, 0),
-                    2,
-                )
-
-                cv2.putText(
-                    frame,
-                    "Counting Box",
-                    (
-                        counting_x1 - 10,
-                        max(counting_y1 - 10, 20),
-                    ),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (255, 0, 0),
-                    2,
-                )
-
-            return (
-                frame,
-                len(detections),
-            )
-
-
-    def get_capture_output_dir(self):
-        return os.path.join(
-            self.output_dir,
-            self.inventory_type,
-            self.invoice,
-            self.tool,
-            self.brand,
+        cv2.rectangle(
+            frame,
+            (x1, y1),
+            (x2, y2),
+            (255, 0, 255),
+            2,
         )
 
-    def get_file_prefix(self):
-        return (
-            f"{self.invoice}_{self.tool}_{self.brand}_"
+        cv2.putText(
+            frame,
+            "Scan Dot",
+            (x1 - 10, max(y1 - 10, 20)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (255, 0, 255),
+            2,
+        )
+
+    def _draw_crop_box(self, frame):
+        if self.crop_box is None or not self.show_crop_box:
+            return
+
+        x1, y1, x2, y2 = self.crop_box
+
+        cv2.rectangle(
+            frame,
+            (x1, y1),
+            (x2, y2),
+            (0, 255, 0),
+            2,
+        )
+
+        cv2.putText(
+            frame,
+            "Preview Crop",
+            (x1 - 10, max(y1 - 10, 20)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 255, 0),
+            2,
+        )
+
+    def _draw_counting_box(self, frame):
+        if self.counting_box is None or not self.show_counting_box:
+            return
+
+        x1, y1, x2, y2 = self.counting_box
+
+        cv2.rectangle(
+            frame,
+            (x1, y1),
+            (x2, y2),
+            (255, 0, 0),
+            2,
+        )
+
+        cv2.putText(
+            frame,
+            "Counting Box",
+            (x1 - 10, max(y1 - 10, 20)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (255, 0, 0),
+            2,
         )
 
     # ==================================================
