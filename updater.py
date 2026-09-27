@@ -18,7 +18,6 @@ GITHUB_API_URL = (
 # Once the repository is public, set this to None.
 #
 # Do NOT commit a real token to GitHub.
-GITHUB_TOKEN="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"
 
 
 def check_for_updates(
@@ -43,16 +42,9 @@ def _check_for_updates(
 ):
     try:
         headers = {
-            "Accept": (
-                "application/vnd.github+json"
-            ),
+            "Accept": "application/vnd.github+json",
             "User-Agent": "ToolScanner",
         }
-
-        if GITHUB_TOKEN:
-            headers["Authorization"] = (
-                f"Bearer {GITHUB_TOKEN}"
-            )
 
         request = urllib.request.Request(
             GITHUB_API_URL,
@@ -121,16 +113,9 @@ def _download_update(
         )
 
         headers = {
-            "Accept": (
-                "application/vnd.github+json"
-            ),
+            "Accept": "application/vnd.github+json",
             "User-Agent": "ToolScanner",
         }
-
-        if GITHUB_TOKEN:
-            headers["Authorization"] = (
-                f"Bearer {GITHUB_TOKEN}"
-            )
 
         request = urllib.request.Request(
             zip_url,
