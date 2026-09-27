@@ -1,6 +1,7 @@
 import copy
 import json
 import os
+import shutil
 import tkinter as tk
 from tkinter import ttk
 from tkinter import filedialog, messagebox
@@ -218,6 +219,54 @@ class GeneralSettings:
             self.output_dir.set(directory)
             self.save_settings()
 
+    def import_tool_log(self):
+        source_file = filedialog.askopenfilename(
+            title="Select Tool Log File",
+            filetypes=[
+                ("Excel files", "*.xlsx"),
+                ("Excel files", "*.xls"),
+                ("All files", "*.*"),
+            ],
+        )
+
+        if not source_file:
+            return
+
+        logs_dir = os.path.join(
+            self.output_dir.get() or OUTPUT_DIR,
+            "Logs",
+        )
+
+        try:
+            os.makedirs(
+                logs_dir,
+                exist_ok=True,
+            )
+
+            extension = os.path.splitext(source_file)[1]
+
+            destination_file = os.path.join(
+                logs_dir,
+                f"Tool_Log{extension}",
+            )
+
+            shutil.copy2(
+                source_file,
+                destination_file,
+            )
+
+            messagebox.showinfo(
+                "Tool Log Imported",
+                f"Tool Log imported successfully:\n\n{destination_file}",
+                parent=self.parent,
+            )
+
+        except OSError as error:
+            messagebox.showerror(
+                "Import Failed",
+                f"Could not import the Tool Log file:\n\n{error}",
+                parent=self.parent,
+            )
 
     def change_manual_capture_key(self, event=None):
         key = self.manual_capture_key.get()
@@ -524,6 +573,56 @@ class GeneralSettings:
             _update_scrollregion,
         )
 
+        def _on_mousewheel(event):
+            widget = event.widget
+
+            if isinstance(widget, ttk.Combobox):
+                return
+
+            canvas.yview_scroll(
+                int(-1 * (event.delta / 120)),
+                "units",
+            )
+
+        def _bind_mousewheel(event):
+            canvas.bind_all(
+                "<MouseWheel>",
+                _on_mousewheel,
+            )
+
+            canvas.bind_all(
+                "<Button-4>",
+                lambda event: (
+                    None
+                    if isinstance(event.widget, ttk.Combobox)
+                    else canvas.yview_scroll(-1, "units")
+                ),
+            )
+
+            canvas.bind_all(
+                "<Button-5>",
+                lambda event: (
+                    None
+                    if isinstance(event.widget, ttk.Combobox)
+                    else canvas.yview_scroll(1, "units")
+                ),
+            )
+
+        def _unbind_mousewheel(event):
+            canvas.unbind_all("<MouseWheel>")
+            canvas.unbind_all("<Button-4>")
+            canvas.unbind_all("<Button-5>")
+
+        content_frame.bind(
+            "<Enter>",
+            _bind_mousewheel,
+        )
+
+        content_frame.bind(
+            "<Leave>",
+            _unbind_mousewheel,
+        )
+
         tk.Label(
             content_frame,
             text="General Settings",
@@ -596,6 +695,39 @@ class GeneralSettings:
             pady=(0, 5),
         )
 
+        log_directory_frame = tk.Frame(
+            settings_frame,
+        )
+
+        log_directory_frame.pack(
+            fill=tk.X,
+            pady=(0, 15),
+        )
+
+        tk.Entry(
+            log_directory_frame,
+            textvariable=tk.StringVar(
+                value=os.path.join(
+                    self.output_dir.get() or OUTPUT_DIR,
+                    "Logs",
+                )
+            ),
+            state="readonly",
+        ).pack(
+            side=tk.LEFT,
+            fill=tk.X,
+            expand=True,
+        )
+
+        tk.Button(
+            log_directory_frame,
+            text="Import Tool Log...",
+            command=self.import_tool_log,
+        ).pack(
+            side=tk.LEFT,
+            padx=(10, 0),
+        )
+
         # -------------------------
         # Camera Resolution + Manual Capture Shortcut
         # -------------------------
@@ -638,8 +770,17 @@ class GeneralSettings:
             values=resolution_values,
             state="readonly",
             width=18,
+            takefocus=True,
         )
 
+        resolution_dropdown.bind(
+            "<Button-1>",
+            lambda event: resolution_dropdown.tk.call(
+                "raise",
+                resolution_dropdown._w,
+            ),
+        )
+        
         resolution_dropdown.pack(
             anchor="w",
         )

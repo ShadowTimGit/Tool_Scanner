@@ -512,13 +512,48 @@ class RightPanelMixin:
             )
             return ImageTk.PhotoImage(placeholder)
 
+    def _close_recent_crop_preview(self, preview):
+        if hasattr(self, "_recent_crop_previews"):
+            self._recent_crop_previews.discard(preview)
+
+        try:
+            preview.destroy()
+        except tk.TclError:
+            pass
+
+
+    def close_recent_crop_previews(self):
+        previews = getattr(
+            self,
+            "_recent_crop_previews",
+            set(),
+        )
+
+        for preview in list(previews):
+            try:
+                preview.destroy()
+            except tk.TclError:
+                pass
+
+        previews.clear()
+
     def open_recent_crop_image(self, entry):
         image_path = entry.get("image_path")
 
         if not image_path or not os.path.exists(image_path):
             return
 
+        if not hasattr(self, "_recent_crop_previews"):
+            self._recent_crop_previews = set()
+
         preview = tk.Toplevel(self.root)
+        self._recent_crop_previews.add(preview)
+
+        preview.protocol(
+            "WM_DELETE_WINDOW",
+            lambda window=preview: self._close_recent_crop_preview(window),
+        )
+
         preview.title(
             f"Recent Crop - {os.path.basename(image_path)}"
         )
@@ -561,7 +596,7 @@ class RightPanelMixin:
             close_button = tk.Button(
                 preview,
                 text="Close",
-                command=preview.destroy,
+                command=lambda window=preview: self._close_recent_crop_preview(window),
             )
             close_button.pack(
                 pady=(0, 10),

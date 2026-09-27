@@ -450,6 +450,8 @@ class ToolScannerGUI(
         self.save_window_size()
         self.stop_camera()
 
+        self.close_recent_crop_previews()
+
         if (
             self.settings_window is not None
             and self.settings_window.window.winfo_exists()

@@ -1347,7 +1347,7 @@ class CameraProcessor:
             objects
         )
 
-        if manual_objects:
+        if manual_objects or not self.show_counting_box:
             self._capture_manual_objects(
                 original_frame=original_frame,
                 manual_objects=manual_objects,
@@ -1355,7 +1355,10 @@ class CameraProcessor:
             return
 
     def _get_manual_capture_objects(self, objects):
-        """Return sufficiently tracked objects eligible for manual capture."""
+        # If the counting box is disabled, manual capture does not
+        # require a detected/tracked object.
+        if not self.show_counting_box:
+            return objects
 
         manual_objects = {}
 
@@ -1365,10 +1368,7 @@ class CameraProcessor:
 
             object_box = self._get_object_box(obj)
 
-            if (
-                not self.show_counting_box
-                or self.object_center_inside_counting_box(object_box)
-            ):
+            if self.object_center_inside_counting_box(object_box):
                 manual_objects[object_id] = obj
 
         return manual_objects
