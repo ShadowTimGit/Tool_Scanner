@@ -1,22 +1,57 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QComboBox,
+    QListWidget,
+    QLineEdit,
+    QPushButton,
+    QMessageBox,
+    QFrame,
+)
 
 from settings_menu.settings_config import (
     DEFAULT_SAE_SIZES,
     DEFAULT_METRIC_SIZES,
-    DEFAULT_OTHER
+    DEFAULT_OTHER,
+)
+
+from GUI.appearance_controller import (
+    AppearanceController,
+    PANEL_BG,
+    CARD_BG,
+    CARD_HOVER,
+    INPUT_BG,
+    BORDER_COLOR,
+    TEXT_COLOR,
+    MUTED_TEXT,
+    ACCENT_COLOR,
+    ACCENT_HOVER,
+    DANGER_COLOR,
+    DANGER_HOVER,
+    WHITE_TEXT,
 )
 
 
-class SizeSettings:
+class SizeSettings(QWidget):
 
     def __init__(
         self,
         parent,
         on_sizes_changed,
     ):
+        super().__init__(parent)
+
         self.parent = parent
         self.on_sizes_changed = on_sizes_changed
+
+        self.appearance_mode = getattr(
+            parent,
+            "appearance_mode",
+            "Dark",
+        )
 
         self.sizes = {
             "SAE": list(DEFAULT_SAE_SIZES),
@@ -24,216 +59,535 @@ class SizeSettings:
             "Other": list(DEFAULT_OTHER),
             "DUAL": [],
         }
+
         self.create_gui()
+
+    # =========================================================
+    # Appearance
+    # =========================================================
+
+    def get_color(
+        self,
+        color,
+        mode=None,
+    ):
+        if mode is None:
+            mode = self.appearance_mode
+
+        return AppearanceController.get_color(
+            color,
+            mode,
+        )
+
+    def update_appearance(
+        self,
+        mode=None,
+    ):
+        if mode is None:
+            mode = "Dark"
+
+        self.appearance_mode = mode
+
+        self.card.setStyleSheet(
+            f"""
+            QFrame {{
+                background-color: {self.get_color(CARD_BG)};
+                border: 1px solid {self.get_color(BORDER_COLOR)};
+                border-radius: 10px;
+            }}
+            """
+        )
+
+        self.header_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {self.get_color(TEXT_COLOR)};
+                font-size: 18px;
+                font-weight: bold;
+                background: transparent;
+            }}
+            """
+        )
+
+        self.description_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {self.get_color(MUTED_TEXT)};
+                font-size: 12px;
+                background: transparent;
+            }}
+            """
+        )
+
+        self.measurement_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {self.get_color(TEXT_COLOR)};
+                font-size: 12px;
+                font-weight: bold;
+                background: transparent;
+            }}
+            """
+        )
+
+        self.available_sizes_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {self.get_color(TEXT_COLOR)};
+                font-size: 12px;
+                font-weight: bold;
+                background: transparent;
+            }}
+            """
+        )
+
+        self.measurement_dropdown.setStyleSheet(
+            f"""
+            QComboBox {{
+                background-color: {self.get_color(INPUT_BG)};
+                color: {self.get_color(TEXT_COLOR)};
+                border: 1px solid {self.get_color(BORDER_COLOR)};
+                border-radius: 6px;
+                padding: 0 10px;
+                font-size: 12px;
+            }}
+
+            QComboBox:hover {{
+                border-color: {self.get_color(ACCENT_COLOR)};
+            }}
+
+            QComboBox:focus {{
+                border-color: {self.get_color(ACCENT_COLOR)};
+            }}
+
+            QComboBox::drop-down {{
+                border: none;
+                width: 28px;
+            }}
+
+            QComboBox QAbstractItemView {{
+                background-color: {self.get_color(PANEL_BG)};
+                color: {self.get_color(TEXT_COLOR)};
+                border: 1px solid {self.get_color(BORDER_COLOR)};
+                selection-background-color: {self.get_color(CARD_HOVER)};
+                selection-color: {self.get_color(TEXT_COLOR)};
+                padding: 4px;
+            }}
+            """
+        )
+
+        self.size_listbox.setStyleSheet(
+            f"""
+            QListWidget {{
+                background-color: {self.get_color(INPUT_BG)};
+                color: {self.get_color(TEXT_COLOR)};
+                border: 1px solid {self.get_color(BORDER_COLOR)};
+                border-radius: 6px;
+                padding: 6px;
+                font-size: 11px;
+                outline: none;
+            }}
+
+            QListWidget::item {{
+                padding: 5px;
+                border-radius: 4px;
+            }}
+
+            QListWidget::item:selected {{
+                background-color: {self.get_color(ACCENT_COLOR)};
+                color: {self.get_color(WHITE_TEXT)};
+            }}
+
+            QListWidget::item:hover {{
+                background-color: {self.get_color(CARD_HOVER)};
+            }}
+
+            QScrollBar:vertical {{
+                background-color: {self.get_color(INPUT_BG)};
+                width: 10px;
+                margin: 4px;
+            }}
+
+            QScrollBar::handle:vertical {{
+                background-color: {self.get_color(CARD_BG)};
+                border-radius: 5px;
+                min-height: 20px;
+            }}
+
+            QScrollBar::handle:vertical:hover {{
+                background-color: {self.get_color(CARD_HOVER)};
+            }}
+
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+            """
+        )
+
+        self.size_entry.setStyleSheet(
+            f"""
+            QLineEdit {{
+                background-color: {self.get_color(INPUT_BG)};
+                color: {self.get_color(TEXT_COLOR)};
+                border: 1px solid {self.get_color(BORDER_COLOR)};
+                border-radius: 6px;
+                padding: 0 10px;
+                font-size: 12px;
+            }}
+
+            QLineEdit:hover {{
+                border-color: {self.get_color(ACCENT_COLOR)};
+            }}
+
+            QLineEdit:focus {{
+                border-color: {self.get_color(ACCENT_COLOR)};
+            }}
+
+            QLineEdit:disabled {{
+                color: {self.get_color(MUTED_TEXT)};
+                background-color: {self.get_color(PANEL_BG)};
+            }}
+
+            QLineEdit::placeholder {{
+                color: {self.get_color(MUTED_TEXT)};
+            }}
+            """
+        )
+
+        self.add_button.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {self.get_color(ACCENT_COLOR)};
+                color: {self.get_color(WHITE_TEXT)};
+                border: none;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: bold;
+            }}
+
+            QPushButton:hover {{
+                background-color: {self.get_color(ACCENT_HOVER)};
+            }}
+
+            QPushButton:pressed {{
+                background-color: {self.get_color(ACCENT_COLOR)};
+            }}
+
+            QPushButton:disabled {{
+                background-color: {self.get_color(CARD_BG)};
+                color: {self.get_color(MUTED_TEXT)};
+            }}
+            """
+        )
+
+        self.remove_button.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {self.get_color(CARD_BG)};
+                color: {self.get_color(TEXT_COLOR)};
+                border: 1px solid {self.get_color(BORDER_COLOR)};
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: bold;
+            }}
+
+            QPushButton:hover {{
+                background-color: {self.get_color(DANGER_HOVER)};
+                color: {self.get_color(WHITE_TEXT)};
+                border-color: {self.get_color(DANGER_HOVER)};
+            }}
+
+            QPushButton:pressed {{
+                background-color: {self.get_color(DANGER_COLOR)};
+                color: {self.get_color(WHITE_TEXT)};
+                border-color: {self.get_color(DANGER_COLOR)};
+            }}
+
+            QPushButton:disabled {{
+                background-color: {self.get_color(CARD_BG)};
+                color: {self.get_color(MUTED_TEXT)};
+                border-color: {self.get_color(BORDER_COLOR)};
+            }}
+            """
+        )
+
+        self.update()
 
     # =========================================================
     # GUI
     # =========================================================
 
     def create_gui(self):
-        main_frame = tk.Frame(
-            self.parent,
-            padx=15,
-            pady=15,
+
+        main_layout = QVBoxLayout(
+            self
         )
 
-        main_frame.pack(
-            fill=tk.BOTH,
-            expand=True,
+        main_layout.setContentsMargins(
+            15,
+            15,
+            15,
+            15,
         )
+
+        main_layout.setSpacing(0)
 
         self.create_size_editor(
-            main_frame
+            main_layout
         )
 
-    def create_size_editor(self, parent):
-        frame = tk.LabelFrame(
-            parent,
-            text="General Sizes",
-            padx=15,
-            pady=15,
+    def create_size_editor(
+        self,
+        parent_layout,
+    ):
+        self.card = QFrame(
+            self
         )
 
-        frame.pack(
-            fill=tk.BOTH,
-            expand=True,
+        self.card.setFrameShape(
+            QFrame.Shape.NoFrame
+        )
+
+        parent_layout.addWidget(
+            self.card
+        )
+
+        frame = QWidget(
+            self.card
+        )
+
+        frame.setStyleSheet(
+            "background: transparent;"
+        )
+
+        frame_layout = QVBoxLayout(
+            frame
+        )
+
+        frame_layout.setContentsMargins(
+            20,
+            20,
+            20,
+            20,
+        )
+
+        frame_layout.setSpacing(0)
+
+        # -----------------------------------------------------
+        # Header
+        # -----------------------------------------------------
+
+        self.header_label = QLabel(
+            "General Sizes"
+        )
+
+        frame_layout.addWidget(
+            self.header_label
+        )
+
+        self.description_label = QLabel(
+            "Manage the available sizes for each measurement system."
+        )
+
+        frame_layout.addWidget(
+            self.description_label
+        )
+
+        frame_layout.addSpacing(
+            18
         )
 
         # -----------------------------------------------------
         # Measurement System
         # -----------------------------------------------------
 
-        tk.Label(
-            frame,
-            text="Measurement System:",
-            font=("Arial", 11),
-        ).grid(
-            row=0,
-            column=0,
-            sticky="w",
-            pady=(0, 5),
+        self.measurement_label = QLabel(
+            "Measurement System"
         )
 
-        self.measurement_var = tk.StringVar(
-            value="SAE"
+        frame_layout.addWidget(
+            self.measurement_label
         )
 
-        self.measurement_dropdown = ttk.Combobox(
-            frame,
-            textvariable=self.measurement_var,
-            state="readonly",
-            values=[
+        frame_layout.addSpacing(
+            6
+        )
+
+        self.measurement_dropdown = QComboBox()
+
+        self.measurement_dropdown.addItems(
+            [
                 "SAE",
                 "Metric",
                 "Other",
                 "DUAL",
-            ],
-            width=20,
+            ]
         )
 
-        self.measurement_dropdown.grid(
-            row=1,
-            column=0,
-            sticky="ew",
-            pady=(0, 15),
+        self.measurement_dropdown.setCurrentText(
+            "SAE"
         )
 
-        self.measurement_dropdown.bind(
-            "<<ComboboxSelected>>",
-            self.on_measurement_changed,
+        self.measurement_dropdown.setFixedWidth(
+            220
+        )
+
+        self.measurement_dropdown.setFixedHeight(
+            36
+        )
+
+        self.measurement_dropdown.currentTextChanged.connect(
+            self.on_measurement_changed
+        )
+
+        frame_layout.addWidget(
+            self.measurement_dropdown
+        )
+
+        frame_layout.addSpacing(
+            18
+        )
+
+        # -----------------------------------------------------
+        # Size List Label
+        # -----------------------------------------------------
+
+        self.available_sizes_label = QLabel(
+            "Available Sizes"
+        )
+
+        frame_layout.addWidget(
+            self.available_sizes_label
+        )
+
+        frame_layout.addSpacing(
+            6
         )
 
         # -----------------------------------------------------
         # Size List
         # -----------------------------------------------------
 
-        tk.Label(
-            frame,
-            text="Available Sizes:",
-            font=("Arial", 11),
-        ).grid(
-            row=2,
-            column=0,
-            sticky="w",
-            pady=(0, 5),
+        self.size_listbox = QListWidget()
+
+        self.size_listbox.setMinimumHeight(
+            250
         )
 
-        list_frame = tk.Frame(frame)
-
-        list_frame.grid(
-            row=3,
-            column=0,
-            sticky="nsew",
+        frame_layout.addWidget(
+            self.size_listbox,
+            1,
         )
 
-        list_frame.grid_columnconfigure(
-            0,
-            weight=1,
-        )
-
-        list_frame.grid_rowconfigure(
-            0,
-            weight=1,
-        )
-
-        self.size_listbox = tk.Listbox(
-            list_frame,
-            height=15,
-            exportselection=False,
-            font=("Arial", 11),
-        )
-
-        self.size_listbox.grid(
-            row=0,
-            column=0,
-            sticky="nsew",
-        )
-
-        scrollbar = ttk.Scrollbar(
-            list_frame,
-            orient=tk.VERTICAL,
-            command=self.size_listbox.yview,
-        )
-
-        scrollbar.grid(
-            row=0,
-            column=1,
-            sticky="ns",
-        )
-
-        self.size_listbox.config(
-            yscrollcommand=scrollbar.set
+        frame_layout.addSpacing(
+            12
         )
 
         # -----------------------------------------------------
         # Controls
         # -----------------------------------------------------
 
-        controls = tk.Frame(frame)
+        controls = QWidget()
 
-        controls.grid(
-            row=4,
-            column=0,
-            sticky="ew",
-            pady=(10, 0),
+        controls.setStyleSheet(
+            "background: transparent;"
         )
 
-        controls.grid_columnconfigure(
+        controls_layout = QHBoxLayout(
+            controls
+        )
+
+        controls_layout.setContentsMargins(
             0,
-            weight=1,
-        )
-
-        self.size_entry = tk.Entry(
-            controls,
-            font=("Arial", 11),
-        )
-
-        self.size_entry.grid(
-            row=0,
-            column=0,
-            sticky="ew",
-            padx=(0, 5),
-        )
-
-        tk.Button(
-            controls,
-            text="Add Size",
-            width=12,
-            command=self.add_size,
-        ).grid(
-            row=0,
-            column=1,
-            padx=2,
-        )
-
-        tk.Button(
-            controls,
-            text="Remove Size",
-            width=12,
-            command=self.remove_size,
-        ).grid(
-            row=0,
-            column=2,
-            padx=2,
-        )
-
-        frame.grid_columnconfigure(
             0,
-            weight=1,
+            0,
+            0,
         )
 
-        frame.grid_rowconfigure(
-            3,
-            weight=1,
+        controls_layout.setSpacing(
+            6
         )
+
+        self.size_entry = QLineEdit()
+
+        self.size_entry.setFixedHeight(
+            36
+        )
+
+        self.size_entry.setPlaceholderText(
+            "Enter size..."
+        )
+
+        controls_layout.addWidget(
+            self.size_entry,
+            1,
+        )
+
+        # -----------------------------------------------------
+        # Add Button
+        # -----------------------------------------------------
+
+        self.add_button = QPushButton(
+            "Add Size"
+        )
+
+        self.add_button.setFixedSize(
+            110,
+            36,
+        )
+
+        self.add_button.clicked.connect(
+            self.add_size
+        )
+
+        controls_layout.addWidget(
+            self.add_button
+        )
+
+        # -----------------------------------------------------
+        # Remove Button
+        # -----------------------------------------------------
+
+        self.remove_button = QPushButton(
+            "Remove Size"
+        )
+
+        self.remove_button.setFixedSize(
+            110,
+            36,
+        )
+
+        self.remove_button.clicked.connect(
+            self.remove_size
+        )
+
+        controls_layout.addWidget(
+            self.remove_button
+        )
+
+        frame_layout.addWidget(
+            controls
+        )
+
+        # -----------------------------------------------------
+        # Initial Data
+        # -----------------------------------------------------
 
         self.refresh_size_list()
+
+        self.update_appearance(
+            self.appearance_mode
+        )
 
     # =========================================================
     # Measurement Selection
     # =========================================================
 
-    def on_measurement_changed(self, event=None):
+    def on_measurement_changed(
+        self,
+        measurement,
+    ):
         self.refresh_size_list()
 
     # =========================================================
@@ -241,38 +595,48 @@ class SizeSettings:
     # =========================================================
 
     def add_size(self):
-        measurement = self.measurement_var.get()
+        measurement = (
+            self.measurement_dropdown.currentText()
+        )
 
-        if measurement in {"Other", "DUAL"}:
+        if measurement in {
+            "Other",
+            "DUAL",
+        }:
             return
 
-        size = self.size_entry.get().strip()
+        size = (
+            self.size_entry
+            .text()
+            .strip()
+        )
 
         if not size:
             return
 
-        sizes = self.sizes[measurement]
+        sizes = self.sizes[
+            measurement
+        ]
 
         if any(
             existing.casefold() == size.casefold()
             for existing in sizes
         ):
-            messagebox.showwarning(
+            QMessageBox.warning(
+                self.parent,
                 "Size Exists",
                 (
                     f"{size} already exists in "
                     f"{measurement} sizes."
                 ),
-                parent=self.parent,
             )
             return
 
-        sizes.append(size)
-
-        self.size_entry.delete(
-            0,
-            tk.END,
+        sizes.append(
+            size
         )
+
+        self.size_entry.clear()
 
         self.sort_sizes(
             measurement
@@ -289,40 +653,48 @@ class SizeSettings:
     # =========================================================
 
     def remove_size(self):
-        measurement = self.measurement_var.get()
+        measurement = (
+            self.measurement_dropdown.currentText()
+        )
 
-        if measurement in {"Other", "DUAL"}:
+        if measurement in {
+            "Other",
+            "DUAL",
+        }:
             return
 
         selection = (
-            self.size_listbox.curselection()
+            self.size_listbox.selectedItems()
         )
 
         if not selection:
-            messagebox.showwarning(
+            QMessageBox.warning(
+                self.parent,
                 "Select Size",
                 "Select a size to remove.",
-                parent=self.parent,
             )
             return
 
-        size = self.size_listbox.get(
-            selection[0]
-        )
+        size = selection[0].text()
 
-        answer = messagebox.askyesno(
+        answer = QMessageBox.question(
+            self.parent,
             "Remove Size",
             (
                 f"Remove '{size}' from "
                 f"{measurement} sizes?"
             ),
-            parent=self.parent,
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
 
-        if not answer:
+        if answer != QMessageBox.StandardButton.Yes:
             return
 
-        self.sizes[measurement].remove(
+        self.sizes[
+            measurement
+        ].remove(
             size
         )
 
@@ -337,12 +709,12 @@ class SizeSettings:
     # =========================================================
 
     def refresh_size_list(self):
-        measurement = self.measurement_var.get()
-
-        self.size_listbox.delete(
-            0,
-            tk.END,
+        measurement = (
+            self.measurement_dropdown.currentText()
         )
+
+        self.size_listbox.clear()
+
         if measurement == "Other":
             sizes = self.sizes.get(
                 "Other",
@@ -358,18 +730,38 @@ class SizeSettings:
                 [],
             )
 
-        for size in sizes:
-            self.size_listbox.insert(
-                tk.END,
-                size,
-            )
+        self.size_listbox.addItems(
+            sizes
+        )
+
+        is_editable = measurement not in {
+            "Other",
+            "DUAL",
+        }
+
+        self.size_entry.setEnabled(
+            is_editable
+        )
+
+        self.add_button.setEnabled(
+            is_editable
+        )
+
+        self.remove_button.setEnabled(
+            is_editable
+        )
 
     # =========================================================
     # Sorting
     # =========================================================
 
-    def sort_sizes(self, measurement):
-        self.sizes[measurement].sort(
+    def sort_sizes(
+        self,
+        measurement,
+    ):
+        self.sizes[
+            measurement
+        ].sort(
             key=self.size_sort_key
         )
 
@@ -392,9 +784,11 @@ class SizeSettings:
         # SAE fractions / mixed numbers
         try:
             if "-" in value:
-                whole, fraction = value.split(
-                    "-",
-                    1,
+                whole, fraction = (
+                    value.split(
+                        "-",
+                        1,
+                    )
                 )
 
                 numerator, denominator = (
@@ -426,7 +820,9 @@ class SizeSettings:
                 )
 
             else:
-                numeric = float(value)
+                numeric = float(
+                    value
+                )
 
             return (
                 0,

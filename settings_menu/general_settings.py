@@ -1,46 +1,95 @@
+# Replace imports
 import copy
 import json
 import os
 import shutil
-import tkinter as tk
-from tkinter import ttk
-from tkinter import filedialog, messagebox
 
-from config import (
+from PySide6.QtCore import Qt, QEvent
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QGridLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QComboBox,
+    QCheckBox,
+    QMessageBox,
+    QFileDialog,
+    QScrollArea,
+    QFrame,
+    QSizePolicy,
+)
+
+from settings_menu.config import (
     DEFAULT_BOX,
     DEFAULT_CROP,
     SETTINGS_FILE,
     OUTPUT_DIR,
 )
+
 from Camera.camera import SUPPORTED_RESOLUTIONS
-from settings_menu.brand_settings import DEFAULT_BRANDS
+
+from settings_menu.tool_settings import ToolSettings
 from settings_menu.inventory_settings import DEFAULT_INVENTORY
 from settings_menu.tool_repository import DEFAULT_TOOLS
 from settings_menu.settings_config import DEFAULT_METADATA
 
-from logger import rebuild_workbook_from_json, sync_json_from_workbook
+from logger import (
+    rebuild_workbook_from_json,
+    sync_json_from_workbook,
+)
 
-class GeneralSettings:
+from GUI.appearance_controller import (
+    CONTROL_BG,
+    PANEL_BG,
+    CARD_BG,
+    CARD_HOVER,
+    INPUT_BG,
+    BORDER_COLOR,
+    TEXT_COLOR,
+    MUTED_TEXT,
+    ACCENT_COLOR,
+    ACCENT_HOVER,
+    DANGER_COLOR,
+    DANGER_HOVER,
+    WHITE_TEXT,
+)
+class GeneralSettings(QWidget):
+
     def __init__(
         self,
         parent,
         camera,
         main_gui,
     ):
+        super().__init__(parent)
+
+        self.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Expanding,
+        )
+
         self.parent = parent
         self.camera = camera
         self.main_gui = main_gui
 
-        self.crop_analyzed_images = tk.BooleanVar(
-            value=False,
+        self.crop_analyzed_images = False
+
+        self.camera_resolution = (
+            f"{self.camera.camera_width}x"
+            f"{self.camera.camera_height}"
         )
 
-        self.camera_resolution = tk.StringVar()
-        self.output_dir = tk.StringVar()
-        self.log_dir = tk.StringVar()
-        self.manual_capture_key = tk.StringVar(
-            value="space"
+        self.output_dir = OUTPUT_DIR
+
+        self.log_dir = os.path.join(
+            OUTPUT_DIR,
+            "Logs",
         )
+
+        self.manual_capture_key = "space"
 
         self.load_settings()
 
@@ -49,20 +98,64 @@ class GeneralSettings:
             "update_manual_capture_key",
         ):
             self.main_gui.update_manual_capture_key(
-                self.manual_capture_key.get()
+                self.manual_capture_key
             )
 
         self.create_gui()
 
-    def load_settings(self):
+    def eventFilter(self, obj, event):
+        if (
+            isinstance(obj, QComboBox)
+            and event.type() == QEvent.Wheel
+        ):
+            return True
 
-        self.output_dir.set(OUTPUT_DIR)
+        return super().eventFilter(obj, event)
+
+    # =========================================================
+    # Theme
+    # =========================================================
+
+    def update_appearance(self, mode):
+        self._create_stylesheet()
+
+        self.update()
+
+        if hasattr(self, "content_widget"):
+            self.content_widget.update()
+
+        if hasattr(self, "settings_frame"):
+            self.settings_frame.update()
+
+    def apply_theme(self):
+        self.update_appearance(
+            self.main_gui.appearance_controller.get_mode()
+        )
+
+    def _color(self, color):
+        return self.main_gui.appearance_controller.get_color(
+            color,
+            self.main_gui.appearance_controller.get_mode(),
+        )
+    
+    # =========================================================
+    # Settings Loading
+    # =========================================================
+
+    def load_settings(self):
+        self.output_dir = OUTPUT_DIR
+
+        self.log_dir = os.path.join(
+            OUTPUT_DIR,
+            "Logs",
+        )
+
+        self.camera_resolution = (
+            f"{self.camera.camera_width}x"
+            f"{self.camera.camera_height}"
+        )
 
         if not os.path.exists(SETTINGS_FILE):
-            self.camera_resolution.set(
-                f"{self.camera.camera_width}x"
-                f"{self.camera.camera_height}"
-            )
             return
 
         try:
@@ -73,37 +166,31 @@ class GeneralSettings:
             ) as file:
                 settings = json.load(file)
 
-                self.output_dir.set(
-                    settings.get(
-                        "output_dir",
-                        OUTPUT_DIR,
-                    )
-                )
+            if not isinstance(settings, dict):
+                settings = {}
 
-            self.crop_analyzed_images.set(
-                bool(
-                    settings.get(
-                        "crop_analyzed_images",
-                        False,
-                    )
-                )
+            self.output_dir = settings.get(
+                "output_dir",
+                OUTPUT_DIR,
             )
 
-            self.manual_capture_key.set(
+            self.crop_analyzed_images = bool(
                 settings.get(
-                    "manual_capture_key",
-                    "space",
+                    "crop_analyzed_images",
+                    False,
                 )
             )
-        
+
+            self.manual_capture_key = settings.get(
+                "manual_capture_key",
+                "space",
+            )
+
             resolution = settings.get(
                 "camera_resolution"
             )
 
-            if isinstance(
-                resolution,
-                dict,
-            ):
+            if isinstance(resolution, dict):
                 width = int(
                     resolution.get(
                         "width",
@@ -122,20 +209,9 @@ class GeneralSettings:
                     width,
                     height,
                 ) in SUPPORTED_RESOLUTIONS:
-                    self.camera_resolution.set(
+                    self.camera_resolution = (
                         f"{width}x{height}"
                     )
-                else:
-                    self.camera_resolution.set(
-                        f"{self.camera.camera_width}x"
-                        f"{self.camera.camera_height}"
-                    )
-
-            else:
-                self.camera_resolution.set(
-                    f"{self.camera.camera_width}x"
-                    f"{self.camera.camera_height}"
-                )
 
         except (
             OSError,
@@ -143,10 +219,23 @@ class GeneralSettings:
             TypeError,
             json.JSONDecodeError,
         ):
-            self.camera_resolution.set(
+            self.output_dir = OUTPUT_DIR
+            self.crop_analyzed_images = False
+            self.manual_capture_key = "space"
+
+            self.camera_resolution = (
                 f"{self.camera.camera_width}x"
                 f"{self.camera.camera_height}"
             )
+
+        self.log_dir = os.path.join(
+            self.output_dir or OUTPUT_DIR,
+            "Logs",
+        )
+
+    # =========================================================
+    # Settings Saving
+    # =========================================================
 
     def save_settings(self):
         settings = {}
@@ -160,10 +249,7 @@ class GeneralSettings:
                 ) as file:
                     existing_settings = json.load(file)
 
-                if isinstance(
-                    existing_settings,
-                    dict,
-                ):
+                if isinstance(existing_settings, dict):
                     settings = existing_settings
 
             except (
@@ -174,26 +260,31 @@ class GeneralSettings:
             ):
                 settings = {}
 
-        settings["output_dir"] = self.output_dir.get()
+        settings["output_dir"] = self.output_dir
 
         settings["crop_analyzed_images"] = (
-            self.crop_analyzed_images.get()
+            self.crop_analyzed_images
         )
 
         settings["camera_resolution"] = {
-            "width": self.camera.camera_width,
-            "height": self.camera.camera_height,
+            "width": int(self.camera.camera_width),
+            "height": int(self.camera.camera_height),
         }
 
         settings["manual_capture_key"] = (
-            self.manual_capture_key.get()
+            self.manual_capture_key
         )
 
         try:
-            os.makedirs(
-                os.path.dirname(SETTINGS_FILE),
-                exist_ok=True,
+            settings_directory = os.path.dirname(
+                SETTINGS_FILE
             )
+
+            if settings_directory:
+                os.makedirs(
+                    settings_directory,
+                    exist_ok=True,
+                )
 
             with open(
                 SETTINGS_FILE,
@@ -206,34 +297,59 @@ class GeneralSettings:
                     indent=4,
                 )
 
-        except OSError:
-            pass
+        except OSError as error:
+            print(
+                f"ERROR: Could not save settings: {error}"
+            )
+
+    # =========================================================
+    # Output Directory
+    # =========================================================
 
     def choose_output_dir(self):
-        directory = filedialog.askdirectory(
-            title="Select Output Directory",
-            initialdir=self.output_dir.get(),
+        directory = QFileDialog.getExistingDirectory(
+            self.parent,
+            "Select Output Directory",
+            self.output_dir or OUTPUT_DIR,
         )
 
-        if directory:
-            self.output_dir.set(directory)
-            self.save_settings()
+        if not directory:
+            return
+
+        self.output_dir = directory
+
+        self.log_dir = os.path.join(
+            directory,
+            "Logs",
+        )
+
+        self.output_entry.setText(
+            self.output_dir
+        )
+
+        self.log_entry.setText(
+            self.log_dir
+        )
+
+        self.save_settings()
+
+    # =========================================================
+    # Tool Log Import
+    # =========================================================
 
     def import_tool_log(self):
-        source_file = filedialog.askopenfilename(
-            title="Select Tool Log File",
-            filetypes=[
-                ("Excel files", "*.xlsx"),
-                ("Excel files", "*.xls"),
-                ("All files", "*.*"),
-            ],
+        source_file, _ = QFileDialog.getOpenFileName(
+            self.parent,
+            "Select Tool Log File",
+            "",
+            "Excel files (*.xlsx *.xls);;All files (*)",
         )
 
         if not source_file:
             return
 
         logs_dir = os.path.join(
-            self.output_dir.get() or OUTPUT_DIR,
+            self.output_dir or OUTPUT_DIR,
             "Logs",
         )
 
@@ -243,7 +359,9 @@ class GeneralSettings:
                 exist_ok=True,
             )
 
-            extension = os.path.splitext(source_file)[1]
+            extension = os.path.splitext(
+                source_file
+            )[1]
 
             destination_file = os.path.join(
                 logs_dir,
@@ -255,43 +373,47 @@ class GeneralSettings:
                 destination_file,
             )
 
-            messagebox.showinfo(
+            QMessageBox.information(
+                self.parent,
                 "Tool Log Imported",
-                f"Tool Log imported successfully:\n\n{destination_file}",
-                parent=self.parent,
+                (
+                    "Tool Log imported successfully:"
+                    f"\n\n{destination_file}"
+                ),
             )
 
         except OSError as error:
-            messagebox.showerror(
+            QMessageBox.critical(
+                self.parent,
                 "Import Failed",
-                f"Could not import the Tool Log file:\n\n{error}",
-                parent=self.parent,
+                (
+                    "Could not import the Tool Log file:"
+                    f"\n\n{error}"
+                ),
             )
 
-    def change_manual_capture_key(self, event=None):
-        key = self.manual_capture_key.get()
+    # =========================================================
+    # Manual Capture Key
+    # =========================================================
 
-        print("Selected key:", key)
-        print("Main GUI:", self.main_gui)
-        print(
-            "Has update method:",
-            hasattr(
-                self.main_gui,
-                "update_manual_capture_key",
-            ),
-        )
+    def change_manual_capture_key(self, value):
+        self.manual_capture_key = value
 
         if hasattr(
             self.main_gui,
             "update_manual_capture_key",
         ):
-            self.main_gui.update_manual_capture_key(key)
+            self.main_gui.update_manual_capture_key(
+                value
+            )
 
         self.save_settings()
 
-    def change_camera_resolution(self, event=None):
-        value = self.camera_resolution.get()
+    # =========================================================
+    # Camera Resolution
+    # =========================================================
 
+    def change_camera_resolution(self, value):
         try:
             width, height = value.split("x")
 
@@ -308,32 +430,79 @@ class GeneralSettings:
             width,
             height,
         ):
-            self.camera_resolution.set(
+            self.camera_resolution = (
                 f"{self.camera.camera_width}x"
                 f"{self.camera.camera_height}"
             )
 
+            self.resolution_dropdown.setCurrentText(
+                self.camera_resolution
+            )
+
+            self.save_settings()
+
+    # =========================================================
+    # Logger
+    # =========================================================
+
     def rebuild_logger(self):
         try:
             rebuild_workbook_from_json()
+
+            QMessageBox.information(
+                self.parent,
+                "Logger Rebuilt",
+                "The Excel logger was rebuilt successfully.",
+            )
+
         except Exception as error:
             print(
-                f"ERROR: Could not rebuild logger: "
+                "ERROR: Could not rebuild logger: "
                 f"{error}"
+            )
+
+            QMessageBox.critical(
+                self.parent,
+                "Logger Error",
+                (
+                    "Could not rebuild the logger:"
+                    f"\n\n{error}"
+                ),
             )
 
     def sync_logger(self):
         try:
             sync_json_from_workbook()
+
+            QMessageBox.information(
+                self.parent,
+                "Logger Synced",
+                "The JSON logger data was synchronized successfully.",
+            )
+
         except Exception as error:
             print(
-                f"ERROR: Could not sync logger to json: "
+                "ERROR: Could not sync logger to json: "
                 f"{error}"
             )
+
+            QMessageBox.critical(
+                self.parent,
+                "Logger Error",
+                (
+                    "Could not synchronize the logger:"
+                    f"\n\n{error}"
+                ),
+            )
+
+    # =========================================================
+    # Reset Helpers
+    # =========================================================
 
     @staticmethod
     def _box_dict(bounds):
         x1, y1, x2, y2 = bounds
+
         return {
             "x": int(x1),
             "y": int(y1),
@@ -342,8 +511,17 @@ class GeneralSettings:
         }
 
     def _default_settings_dict(self):
-        width = getattr(self.camera, "camera_width", 1920)
-        height = getattr(self.camera, "camera_height", 1080)
+        width = getattr(
+            self.camera,
+            "camera_width",
+            1920,
+        )
+
+        height = getattr(
+            self.camera,
+            "camera_height",
+            1080,
+        )
 
         return {
             "scan_box": self._box_dict(DEFAULT_BOX),
@@ -362,56 +540,104 @@ class GeneralSettings:
             },
         }
 
-    def reset_settings_file(self, include_window_size=True):
+    def reset_settings_file(
+        self,
+        include_window_size=True,
+    ):
         settings = self._default_settings_dict()
+
         if include_window_size:
             settings["window_size"] = {
                 "width": 1100,
                 "height": 900,
             }
         else:
-            settings.pop("window_size", None)
+            settings.pop(
+                "window_size",
+                None,
+            )
 
-        os.makedirs(
-            os.path.dirname(SETTINGS_FILE),
-            exist_ok=True,
+        settings_directory = os.path.dirname(
+            SETTINGS_FILE
         )
+
+        if settings_directory:
+            os.makedirs(
+                settings_directory,
+                exist_ok=True,
+            )
 
         with open(
             SETTINGS_FILE,
             "w",
             encoding="utf-8",
         ) as file:
-            json.dump(settings, file, indent=4)
+            json.dump(
+                settings,
+                file,
+                indent=4,
+            )
+
+    # =========================================================
+    # Full Wipe
+    # =========================================================
 
     def reset_modifiable_settings(self):
-        if not messagebox.askyesno(
+        result = QMessageBox.question(
+            self.parent,
             "Full Wipe",
-            "This will clear the custom option data so the stored lists are blank/NA and can be re-entered manually.\n\nIt does not overwrite the app base settings file.",
-            parent=self.parent,
-        ):
+            (
+                "This will clear the custom option data so "
+                "the stored lists are blank/NA and can be "
+                "re-entered manually.\n\n"
+                "It does not overwrite the app base settings file."
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+
+        if result != QMessageBox.Yes:
             return
 
-        empty_brands = {}
-        with open(
+        brands_path = getattr(
+            ToolSettings,
+            "BRANDS_FILE",
             os.path.join(
                 os.path.dirname(__file__),
                 "settings",
                 "brands.json",
             ),
+        )
+
+        with open(
+            brands_path,
             "w",
             encoding="utf-8",
         ) as file:
-            json.dump(empty_brands, file, indent=4)
+            json.dump({}, file, indent=4)
 
-        empty_inventory = {"estimated_values": {}}
         inventory_path = os.path.join(
             os.path.dirname(__file__),
             "settings",
             "inventory_settings.json",
         )
-        with open(inventory_path, "w", encoding="utf-8") as file:
-            json.dump(empty_inventory, file, indent=4)
+
+        with open(
+            inventory_path,
+            "w",
+            encoding="utf-8",
+        ) as file:
+            json.dump(
+                {"estimated_values": {}},
+                file,
+                indent=4,
+            )
+
+        metadata_path = os.path.join(
+            os.path.dirname(__file__),
+            "settings",
+            "metadata_options.json",
+        )
 
         empty_metadata = {
             "sizes": {
@@ -422,341 +648,476 @@ class GeneralSettings:
             "drive": ["NA"],
             "point": ["NA"],
         }
-        metadata_path = os.path.join(
-            os.path.dirname(__file__),
-            "settings",
-            "metadata_options.json",
-        )
-        with open(metadata_path, "w", encoding="utf-8") as file:
-            json.dump(empty_metadata, file, indent=4)
 
-        empty_tools = {"NA": ["NA"]}
+        with open(
+            metadata_path,
+            "w",
+            encoding="utf-8",
+        ) as file:
+            json.dump(
+                empty_metadata,
+                file,
+                indent=4,
+            )
+
         tools_path = os.path.join(
             os.path.dirname(__file__),
             "settings",
             "tools.json",
         )
-        with open(tools_path, "w", encoding="utf-8") as file:
-            json.dump(empty_tools, file, indent=4)
-
-        if hasattr(self.main_gui, "refresh_main_settings"):
-            self.main_gui.refresh_main_settings()
-
-        messagebox.showinfo(
-            "Full Wipe Complete",
-            "The custom option entries have been cleared to blank/NA values and can be re-entered manually.",
-            parent=self.parent,
-        )
-
-    def reset_all_settings(self):
-        if not messagebox.askyesno(
-            "Reset All Default Settings",
-            "This will restore all stored settings JSON files to their default values: brands.json, inventory_settings.json, metadata_options.json, tools.json, and settings.json.",
-            parent=self.parent,
-        ):
-            return
 
         with open(
+            tools_path,
+            "w",
+            encoding="utf-8",
+        ) as file:
+            json.dump(
+                {"NA": ["NA"]},
+                file,
+                indent=4,
+            )
+
+        if hasattr(
+            self.main_gui,
+            "refresh_main_settings",
+        ):
+            self.main_gui.refresh_main_settings()
+
+        QMessageBox.information(
+            self.parent,
+            "Full Wipe Complete",
+            (
+                "The custom option entries have been "
+                "cleared to blank/NA values and can be "
+                "re-entered manually."
+            ),
+        )
+
+    # =========================================================
+    # Reset All
+    # =========================================================
+
+    def reset_all_settings(self):
+        result = QMessageBox.question(
+            self.parent,
+            "Reset All Default Settings",
+            (
+                "This will restore all stored settings JSON "
+                "files to their default values: brands.json, "
+                "inventory_settings.json, metadata_options.json, "
+                "tools.json, and settings.json."
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+
+        if result != QMessageBox.Yes:
+            return
+
+        brands_path = getattr(
+            ToolSettings,
+            "BRANDS_FILE",
             os.path.join(
                 os.path.dirname(__file__),
                 "settings",
                 "brands.json",
             ),
+        )
+
+        default_brands = copy.deepcopy(
+            getattr(
+                ToolSettings,
+                "DEFAULT_BRANDS",
+                {},
+            )
+        )
+
+        with open(
+            brands_path,
             "w",
             encoding="utf-8",
         ) as file:
-            json.dump(copy.deepcopy(DEFAULT_BRANDS), file, indent=4)
+            json.dump(
+                default_brands,
+                file,
+                indent=4,
+            )
 
         inventory_path = os.path.join(
             os.path.dirname(__file__),
             "settings",
             "inventory_settings.json",
         )
-        with open(inventory_path, "w", encoding="utf-8") as file:
-            json.dump({"estimated_values": copy.deepcopy(DEFAULT_INVENTORY)}, file, indent=4)
+
+        with open(
+            inventory_path,
+            "w",
+            encoding="utf-8",
+        ) as file:
+            json.dump(
+                {
+                    "estimated_values": copy.deepcopy(
+                        DEFAULT_INVENTORY
+                    )
+                },
+                file,
+                indent=4,
+            )
 
         metadata_path = os.path.join(
             os.path.dirname(__file__),
             "settings",
             "metadata_options.json",
         )
-        default_metadata = copy.deepcopy(DEFAULT_METADATA)
-        default_metadata.pop("specialty_socket", None)
-        with open(metadata_path, "w", encoding="utf-8") as file:
-            json.dump(default_metadata, file, indent=4)
+
+        default_metadata = copy.deepcopy(
+            DEFAULT_METADATA
+        )
+
+        default_metadata.pop(
+            "specialty_socket",
+            None,
+        )
+
+        with open(
+            metadata_path,
+            "w",
+            encoding="utf-8",
+        ) as file:
+            json.dump(
+                default_metadata,
+                file,
+                indent=4,
+            )
 
         tools_path = os.path.join(
             os.path.dirname(__file__),
             "settings",
             "tools.json",
         )
-        with open(tools_path, "w", encoding="utf-8") as file:
-            json.dump(copy.deepcopy(DEFAULT_TOOLS), file, indent=4)
 
-        self.reset_settings_file(include_window_size=True)
+        with open(
+            tools_path,
+            "w",
+            encoding="utf-8",
+        ) as file:
+            json.dump(
+                copy.deepcopy(DEFAULT_TOOLS),
+                file,
+                indent=4,
+            )
 
-        if hasattr(self.main_gui, "refresh_main_settings"):
+        self.reset_settings_file(
+            include_window_size=True
+        )
+
+        self.output_dir = OUTPUT_DIR
+
+        self.log_dir = os.path.join(
+            OUTPUT_DIR,
+            "Logs",
+        )
+
+        self.camera_resolution = (
+            f"{self.camera.camera_width}x"
+            f"{self.camera.camera_height}"
+        )
+
+        self.manual_capture_key = "space"
+        self.crop_analyzed_images = False
+
+        self.output_entry.setText(
+            self.output_dir
+        )
+
+        self.log_entry.setText(
+            self.log_dir
+        )
+
+        self.resolution_dropdown.setCurrentText(
+            self.camera_resolution
+        )
+
+        self.manual_capture_dropdown.setCurrentText(
+            self.manual_capture_key
+        )
+
+        self.crop_checkbox.setChecked(False)
+
+        if hasattr(
+            self.main_gui,
+            "update_manual_capture_key",
+        ):
+            self.main_gui.update_manual_capture_key(
+                "space"
+            )
+
+        if hasattr(
+            self.main_gui,
+            "refresh_main_settings",
+        ):
             self.main_gui.refresh_main_settings()
 
-        messagebox.showinfo(
+        QMessageBox.information(
+            self.parent,
             "Defaults Restored",
-            "The stored JSON settings files have been restored to their default values.",
-            parent=self.parent,
+            (
+                "The stored JSON settings files have "
+                "been restored to their default values."
+            ),
         )
+
+    # =========================================================
+    # GUI
+    # =========================================================
 
     def create_gui(self):
-        outer_frame = tk.Frame(
-            self.parent,
-            padx=20,
-            pady=20,
+        outer_layout = QVBoxLayout(self)
+
+        outer_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
         )
 
-        outer_frame.pack(
-            fill=tk.BOTH,
-            expand=True,
+        outer_layout.setSpacing(0)
+
+        self.content_frame = QScrollArea()
+
+        self.content_frame.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Expanding,
         )
 
-        canvas = tk.Canvas(
-            outer_frame,
-            highlightthickness=0,
-        )
-        scrollbar = ttk.Scrollbar(
-            outer_frame,
-            orient=tk.VERTICAL,
-            command=canvas.yview,
+        self.content_frame.setWidgetResizable(True)
+        self.content_frame.setFrameShape(
+            QFrame.NoFrame
         )
 
-        canvas.pack(
-            side=tk.LEFT,
-            fill=tk.BOTH,
-            expand=True,
-        )
-        scrollbar.pack(
-            side=tk.RIGHT,
-            fill=tk.Y,
+        self.content_widget = QWidget()
+
+        self.content_widget.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Expanding,
         )
 
-        canvas.configure(
-            yscrollcommand=scrollbar.set,
+        content_layout = QVBoxLayout(
+            self.content_widget
         )
 
-        content_frame = tk.Frame(
-            canvas,
-            padx=4,
-            pady=4,
-        )
-        canvas_window = canvas.create_window(
-            (0, 0),
-            window=content_frame,
-            anchor="nw",
+        content_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
         )
 
-        def _update_scrollregion(event=None):
-            canvas_width = max(
-                canvas.winfo_width(),
-                content_frame.winfo_reqwidth(),
-            )
-            canvas.itemconfigure(
-                canvas_window,
-                width=canvas_width,
-            )
-            canvas.configure(
-                scrollregion=canvas.bbox("all"),
-            )
+        content_layout.setSpacing(0)
 
-        content_frame.bind(
-            "<Configure>",
-            _update_scrollregion,
-        )
-        canvas.bind(
-            "<Configure>",
-            _update_scrollregion,
+        self.content_frame.setWidget(
+            self.content_widget
         )
 
-        def _on_mousewheel(event):
-            widget = event.widget
-
-            if isinstance(widget, ttk.Combobox):
-                return
-
-            canvas.yview_scroll(
-                int(-1 * (event.delta / 120)),
-                "units",
-            )
-
-        def _bind_mousewheel(event):
-            canvas.bind_all(
-                "<MouseWheel>",
-                _on_mousewheel,
-            )
-
-            canvas.bind_all(
-                "<Button-4>",
-                lambda event: (
-                    None
-                    if isinstance(event.widget, ttk.Combobox)
-                    else canvas.yview_scroll(-1, "units")
-                ),
-            )
-
-            canvas.bind_all(
-                "<Button-5>",
-                lambda event: (
-                    None
-                    if isinstance(event.widget, ttk.Combobox)
-                    else canvas.yview_scroll(1, "units")
-                ),
-            )
-
-        def _unbind_mousewheel(event):
-            canvas.unbind_all("<MouseWheel>")
-            canvas.unbind_all("<Button-4>")
-            canvas.unbind_all("<Button-5>")
-
-        content_frame.bind(
-            "<Enter>",
-            _bind_mousewheel,
+        outer_layout.addWidget(
+            self.content_frame
         )
 
-        content_frame.bind(
-            "<Leave>",
-            _unbind_mousewheel,
+        # -----------------------------------------------------
+        # Header
+        # -----------------------------------------------------
+
+        self.header_label = QLabel(
+            "General Settings"
         )
 
-        tk.Label(
-            content_frame,
-            text="General Settings",
-            font=("Arial", 14, "bold"),
-        ).pack(
-            anchor="w",
-            pady=(0, 20),
+        self.header_label.setObjectName(
+            "pageTitle"
         )
 
-        settings_frame = tk.Frame(
-            content_frame,
-            relief=tk.GROOVE,
-            borderwidth=1,
-            padx=15,
-            pady=15,
+        content_layout.addWidget(
+            self.header_label
         )
 
-        settings_frame.pack(
-            fill=tk.X,
-            anchor="w",
+        self.description_label = QLabel(
+            "Configure output, camera, capture, logging, and reset options."
         )
 
-        # -------------------------
-        # Output Settings
-        # -------------------------
-
-        tk.Label(
-            settings_frame,
-            text="Output Directory",
-            font=("Arial", 10, "bold"),
-        ).pack(
-            anchor="w",
-            pady=(0, 5),
+        self.description_label.setObjectName(
+            "pageDescription"
         )
 
-        output_frame = tk.Frame(
-            settings_frame,
+        content_layout.addWidget(
+            self.description_label
         )
 
-        output_frame.pack(
-            fill=tk.X,
-            pady=(0, 15),
+        # -----------------------------------------------------
+        # Main Card
+        # -----------------------------------------------------
+
+        self.settings_frame = QFrame()
+
+        self.settings_frame.setObjectName(
+            "settingsCard"
         )
 
-        tk.Entry(
-            output_frame,
-            textvariable=self.output_dir,
-            state="readonly",
-        ).pack(
-            side=tk.LEFT,
-            fill=tk.X,
-            expand=True,
+        card_layout = QVBoxLayout(
+            self.settings_frame
         )
 
-        tk.Button(
-            output_frame,
-            text="Browse...",
-            command=self.choose_output_dir,
-        ).pack(
-            side=tk.LEFT,
-            padx=(10, 0),
+        card_layout.setContentsMargins(
+            20,
+            20,
+            20,
+            20,
         )
 
-        tk.Label(
-            settings_frame,
-            text="Log Directory",
-            font=("Arial", 10, "bold"),
-        ).pack(
-            anchor="w",
-            pady=(0, 5),
+        card_layout.setSpacing(0)
+
+        content_layout.addWidget(
+            self.settings_frame
         )
 
-        log_directory_frame = tk.Frame(
-            settings_frame,
+        # -----------------------------------------------------
+        # Output
+        # -----------------------------------------------------
+
+        self._create_section_title(
+            card_layout,
+            "Output",
+            "Configure where captured files and tool logs are stored.",
         )
 
-        log_directory_frame.pack(
-            fill=tk.X,
-            pady=(0, 15),
+        output_label = QLabel(
+            "Output Directory"
         )
 
-        tk.Entry(
-            log_directory_frame,
-            textvariable=tk.StringVar(
-                value=os.path.join(
-                    self.output_dir.get() or OUTPUT_DIR,
-                    "Logs",
-                )
-            ),
-            state="readonly",
-        ).pack(
-            side=tk.LEFT,
-            fill=tk.X,
-            expand=True,
+        output_label.setObjectName(
+            "fieldLabel"
         )
 
-        tk.Button(
-            log_directory_frame,
-            text="Import Tool Log...",
-            command=self.import_tool_log,
-        ).pack(
-            side=tk.LEFT,
-            padx=(10, 0),
+        card_layout.addWidget(
+            output_label
         )
 
-        # -------------------------
-        # Camera Resolution + Manual Capture Shortcut
-        # -------------------------
+        output_layout = QHBoxLayout()
+        output_layout.setSpacing(10)
 
-        chooser_row = tk.Frame(
-            settings_frame,
-        )
-        chooser_row.pack(
-            fill=tk.X,
-            pady=(0, 20),
+        self.output_entry = QLineEdit(
+            self.output_dir
         )
 
-        resolution_frame = tk.Frame(
-            chooser_row,
-            width=280,
-        )
-        resolution_frame.pack(
-            side=tk.LEFT,
-            fill=tk.Y,
-            padx=(0, 12),
+        self.output_entry.setReadOnly(True)
+
+        output_layout.addWidget(
+            self.output_entry
         )
 
-        tk.Label(
-            resolution_frame,
-            text="Camera Resolution",
-            font=("Arial", 10, "bold"),
-        ).pack(
-            anchor="w",
-            pady=(0, 5),
+        self.browse_button = QPushButton(
+            "Browse..."
+        )
+
+        self.browse_button.setFixedWidth(
+            100
+        )
+
+        self.browse_button.clicked.connect(
+            self.choose_output_dir
+        )
+
+        output_layout.addWidget(
+            self.browse_button
+        )
+
+        card_layout.addLayout(
+            output_layout
+        )
+
+        # -----------------------------------------------------
+        # Log Directory
+        # -----------------------------------------------------
+
+        log_label = QLabel(
+            "Log Directory"
+        )
+
+        log_label.setObjectName(
+            "fieldLabel"
+        )
+
+        card_layout.addWidget(
+            log_label
+        )
+
+        log_layout = QHBoxLayout()
+        log_layout.setSpacing(10)
+
+        self.log_entry = QLineEdit(
+            self.log_dir
+        )
+
+        self.log_entry.setReadOnly(True)
+
+        log_layout.addWidget(
+            self.log_entry
+        )
+
+        self.import_log_button = QPushButton(
+            "Import Tool Log..."
+        )
+
+        self.import_log_button.setFixedWidth(
+            145
+        )
+
+        self.import_log_button.clicked.connect(
+            self.import_tool_log
+        )
+
+        log_layout.addWidget(
+            self.import_log_button
+        )
+
+        card_layout.addLayout(
+            log_layout
+        )
+
+        # -----------------------------------------------------
+        # Camera
+        # -----------------------------------------------------
+
+        self._create_section_title(
+            card_layout,
+            "Camera & Capture",
+            "Configure camera resolution and the keyboard shortcut for manual capture.",
+            top_margin=24,
+        )
+
+        chooser_row = QHBoxLayout()
+        chooser_row.setSpacing(16)
+
+        resolution_container = QWidget()
+        resolution_layout = QVBoxLayout(
+            resolution_container
+        )
+
+        resolution_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
+        )
+
+        resolution_label = QLabel(
+            "Camera Resolution"
+        )
+
+        resolution_label.setObjectName(
+            "fieldLabel"
+        )
+
+        resolution_layout.addWidget(
+            resolution_label
         )
 
         resolution_values = [
@@ -764,48 +1125,51 @@ class GeneralSettings:
             for width, height in SUPPORTED_RESOLUTIONS
         ]
 
-        resolution_dropdown = ttk.Combobox(
-            resolution_frame,
-            textvariable=self.camera_resolution,
-            values=resolution_values,
-            state="readonly",
-            width=18,
-            takefocus=True,
+        self.resolution_dropdown = QComboBox()
+        self.resolution_dropdown.installEventFilter(self)
+
+        self.resolution_dropdown.addItems(
+            resolution_values
         )
 
-        resolution_dropdown.bind(
-            "<Button-1>",
-            lambda event: resolution_dropdown.tk.call(
-                "raise",
-                resolution_dropdown._w,
-            ),
-        )
-        
-        resolution_dropdown.pack(
-            anchor="w",
+        self.resolution_dropdown.setCurrentText(
+            self.camera_resolution
         )
 
-        resolution_dropdown.bind(
-            "<<ComboboxSelected>>",
-            self.change_camera_resolution,
+        self.resolution_dropdown.currentTextChanged.connect(
+            self.change_camera_resolution
         )
 
-        manual_capture_frame = tk.Frame(
-            chooser_row,
-            width=260,
-        )
-        manual_capture_frame.pack(
-            side=tk.LEFT,
-            fill=tk.Y,
+        resolution_layout.addWidget(
+            self.resolution_dropdown
         )
 
-        tk.Label(
-            manual_capture_frame,
-            text="Manual Capture Shortcut",
-            font=("Arial", 10, "bold"),
-        ).pack(
-            anchor="w",
-            pady=(0, 5),
+        chooser_row.addWidget(
+            resolution_container
+        )
+
+        manual_container = QWidget()
+        manual_layout = QVBoxLayout(
+            manual_container
+        )
+
+        manual_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
+        )
+
+        manual_label = QLabel(
+            "Manual Capture Shortcut"
+        )
+
+        manual_label.setObjectName(
+            "fieldLabel"
+        )
+
+        manual_layout.addWidget(
+            manual_label
         )
 
         manual_capture_values = [
@@ -825,103 +1189,453 @@ class GeneralSettings:
             "F12",
         ]
 
-        manual_capture_dropdown = ttk.Combobox(
-            manual_capture_frame,
-            textvariable=self.manual_capture_key,
-            values=manual_capture_values,
-            state="readonly",
-            width=18,
+        self.manual_capture_dropdown = QComboBox()
+        self.manual_capture_dropdown.installEventFilter(self)
+
+        self.manual_capture_dropdown.addItems(
+            manual_capture_values
         )
 
-        manual_capture_dropdown.pack(
-            anchor="w",
+        self.manual_capture_dropdown.setCurrentText(
+            self.manual_capture_key
         )
 
-        manual_capture_dropdown.bind(
-            "<<ComboboxSelected>>",
-            self.change_manual_capture_key,
+        self.manual_capture_dropdown.currentTextChanged.connect(
+            self.change_manual_capture_key
         )
 
-        # -------------------------
-        # OCR Settings
-        # -------------------------
-
-        tk.Checkbutton(
-            settings_frame,
-            text="Crop images before OCR analysis",
-            variable=self.crop_analyzed_images,
-            command=self.save_settings,
-        ).pack(
-            anchor="w",
+        manual_layout.addWidget(
+            self.manual_capture_dropdown
         )
 
-        # -------------------------
-        # Rebuild and Sync Logs
-        # -------------------------
-
-        tk.Label(
-            settings_frame,
-            text="The Rebuilder will rebuild the excel spreadsheet from existing JSON files. Can be used to create a Backup.",
-            font=("Arial", 10, "bold"),
-        ).pack(
-            anchor="w",
-            pady=(10, 0),
+        chooser_row.addWidget(
+            manual_container
         )
 
-        tk.Button(
-            settings_frame,
-            text="Rebuild Logger",
-            command=self.rebuild_logger,
-        ).pack(
-            anchor="w",
+        card_layout.addLayout(
+            chooser_row
         )
 
-        tk.Label(
-            settings_frame,
-            text="The Sync Logger will modify existing JSON data based on the Tool_Logger.xslx file. Dangerous.",
-            font=("Arial", 10, "bold"),
-        ).pack(
-            anchor="w",
-            pady=(10, 0),
+        # -----------------------------------------------------
+        # OCR
+        # -----------------------------------------------------
+
+        self._create_section_title(
+            card_layout,
+            "OCR",
+            "Control whether images are cropped before OCR analysis.",
+            top_margin=24,
         )
 
-        tk.Button(
-            settings_frame,
-            text="Sync Logger",
-            command=self.sync_logger,
-        ).pack(
-            anchor="w",
-            pady=(10, 0),
+        self.crop_checkbox = QCheckBox(
+            "Crop images before OCR analysis"
         )
 
-        tk.Label(
-            settings_frame,
-            text="Reset all saved custom options to the built-in defaults.",
-            font=("Arial", 10, "bold"),
-        ).pack(
-            anchor="w",
-            pady=(20, 0),
+        self.crop_checkbox.setChecked(
+            self.crop_analyzed_images
         )
 
-        tk.Button(
-            settings_frame,
-            text="Reset All Default Settings",
-            command=self.reset_all_settings,
-            width=24,
-        ).pack(
-            anchor="w",
-            pady=(6, 0),
+        self.crop_checkbox.toggled.connect(
+            self._crop_changed
         )
 
-        tk.Button(
-            settings_frame,
-            text="Full Wipe",
-            command=self.reset_modifiable_settings,
-            width=24,
-        ).pack(
-            anchor="w",
-            pady=(6, 0),
+        card_layout.addWidget(
+            self.crop_checkbox
         )
 
-        canvas.update_idletasks()
-        _update_scrollregion()
+        # -----------------------------------------------------
+        # Logger
+        # -----------------------------------------------------
+
+        self._create_section_title(
+            card_layout,
+            "Logger",
+            "Rebuild or synchronize the Excel logger and its JSON data.",
+            top_margin=24,
+        )
+
+        rebuild_description = QLabel(
+            "Rebuild Logger recreates the Excel spreadsheet from existing JSON files and can be used as a backup."
+        )
+
+        rebuild_description.setObjectName(
+            "fieldDescription"
+        )
+
+        rebuild_description.setWordWrap(
+            True
+        )
+
+        card_layout.addWidget(
+            rebuild_description
+        )
+
+        self.rebuild_logger_button = QPushButton(
+            "Rebuild Logger"
+        )
+
+        self.rebuild_logger_button.setFixedWidth(
+            140
+        )
+
+        self.rebuild_logger_button.clicked.connect(
+            self.rebuild_logger
+        )
+
+        card_layout.addWidget(
+            self.rebuild_logger_button
+        )
+
+        sync_description = QLabel(
+            "Sync Logger modifies existing JSON data based on the Tool_Logger.xlsx file. This can overwrite data."
+        )
+
+        sync_description.setObjectName(
+            "fieldDescription"
+        )
+
+        sync_description.setWordWrap(
+            True
+        )
+
+        card_layout.addWidget(
+            sync_description
+        )
+
+        self.sync_logger_button = QPushButton(
+            "Sync Logger"
+        )
+
+        self.sync_logger_button.setFixedWidth(
+            140
+        )
+
+        self.sync_logger_button.clicked.connect(
+            self.sync_logger
+        )
+
+        card_layout.addWidget(
+            self.sync_logger_button
+        )
+
+        # -----------------------------------------------------
+        # Reset Settings
+        # -----------------------------------------------------
+
+        self._create_section_title(
+            card_layout,
+            "Reset Settings",
+            "Restore defaults or clear custom option data.",
+            top_margin=24,
+        )
+
+        reset_description = QLabel(
+            "Reset All Default Settings restores every stored JSON settings file to its built-in defaults."
+        )
+
+        reset_description.setObjectName(
+            "fieldDescription"
+        )
+
+        reset_description.setWordWrap(
+            True
+        )
+
+        card_layout.addWidget(
+            reset_description
+        )
+
+        self.reset_all_button = QPushButton(
+            "Reset All Default Settings"
+        )
+
+        self.reset_all_button.setFixedWidth(
+            220
+        )
+
+        self.reset_all_button.clicked.connect(
+            self.reset_all_settings
+        )
+
+        card_layout.addWidget(
+            self.reset_all_button
+        )
+
+        wipe_description = QLabel(
+            "Full Wipe clears custom brands, tools, inventory, and metadata entries to blank/NA values."
+        )
+
+        wipe_description.setObjectName(
+            "fieldDescription"
+        )
+
+        wipe_description.setWordWrap(
+            True
+        )
+
+        card_layout.addWidget(
+            wipe_description
+        )
+
+        self.full_wipe_button = QPushButton(
+            "Full Wipe"
+        )
+
+        self.full_wipe_button.setFixedWidth(
+            140
+        )
+
+        self.full_wipe_button.setObjectName(
+            "dangerButton"
+        )
+
+        self.full_wipe_button.clicked.connect(
+            self.reset_modifiable_settings
+        )
+
+        card_layout.addWidget(
+            self.full_wipe_button
+        )
+
+
+        self._create_stylesheet()
+
+    # =========================================================
+    # UI Helpers
+    # =========================================================
+
+    def _create_section_title(
+        self,
+        layout,
+        title,
+        description,
+        top_margin=0,
+    ):
+        container = QWidget()
+
+        section_layout = QVBoxLayout(
+            container
+        )
+
+        section_layout.setContentsMargins(
+            0,
+            top_margin,
+            0,
+            0,
+        )
+
+        section_layout.setSpacing(2)
+
+        title_label = QLabel(title)
+
+        title_label.setObjectName(
+            "sectionTitle"
+        )
+
+        section_layout.addWidget(
+            title_label
+        )
+
+        description_label = QLabel(
+            description
+        )
+
+        description_label.setObjectName(
+            "sectionDescription"
+        )
+
+        description_label.setWordWrap(
+            True
+        )
+
+        section_layout.addWidget(
+            description_label
+        )
+
+        layout.addWidget(
+            container
+        )
+
+    def _crop_changed(self, checked):
+        self.crop_analyzed_images = checked
+        self.save_settings()
+
+    def _create_stylesheet(self):
+
+        panel_bg = self._color(PANEL_BG)
+        card_bg = self._color(CARD_BG)
+        card_hover = self._color(CARD_HOVER)
+        input_bg = self._color(INPUT_BG)
+        border = self._color(BORDER_COLOR)
+        text = self._color(TEXT_COLOR)
+        muted = self._color(MUTED_TEXT)
+        accent = self._color(ACCENT_COLOR)
+        accent_hover = self._color(ACCENT_HOVER)
+        danger = self._color(DANGER_COLOR)
+        danger_hover = self._color(DANGER_HOVER)
+        control_bg = self._color(CONTROL_BG)
+        white = self._color(WHITE_TEXT)
+
+        self.setStyleSheet(
+            f"""
+            QWidget {{
+                color: {text};
+                background: transparent;
+            }}
+
+            QLabel#pageTitle {{
+                color: {text};
+                font-size: 20px;
+                font-weight: 700;
+            }}
+
+            QLabel#pageDescription {{
+                color: {muted};
+                font-size: 12px;
+                margin-bottom: 18px;
+            }}
+
+            QFrame#settingsCard {{
+                background-color: {card_bg};
+                border: 1px solid {border};
+                border-radius: 10px;
+            }}
+
+            QLabel#sectionTitle {{
+                color: {text};
+                font-size: 14px;
+                font-weight: 700;
+            }}
+
+            QLabel#sectionDescription {{
+                color: {muted};
+                font-size: 11px;
+            }}
+
+            QLabel#fieldLabel {{
+                color: {text};
+                font-size: 12px;
+                font-weight: 600;
+                margin-top: 14px;
+                margin-bottom: 6px;
+            }}
+
+            QLabel#fieldDescription {{
+                color: {muted};
+                font-size: 12px;
+                margin-top: 14px;
+                margin-bottom: 6px;
+            }}
+
+            QLineEdit {{
+                min-height: 34px;
+                background-color: {input_bg};
+                color: {text};
+                border: 1px solid {border};
+                border-radius: 6px;
+                padding: 0 10px;
+                font-size: 12px;
+            }}
+
+            QLineEdit:focus {{
+                border: 1px solid {accent};
+            }}
+
+            QComboBox {{
+                min-height: 34px;
+                background-color: {input_bg};
+                color: {text};
+                border: 1px solid {border};
+                border-radius: 6px;
+                padding: 0 10px;
+                font-size: 12px;
+            }}
+
+            QComboBox:hover {{
+                border-color: {accent};
+            }}
+
+            QComboBox QAbstractItemView {{
+                background-color: {panel_bg};
+                color: {text};
+                border: 1px solid {border};
+                selection-background-color: {card_hover};
+                selection-color: {text};
+            }}
+
+            QPushButton {{
+                min-height: 34px;
+                background-color: {card_bg};
+                color: {text};
+                border: 1px solid {border};
+                border-radius: 6px;
+                padding: 0 12px;
+                font-size: 12px;
+                font-weight: 600;
+            }}
+
+            QPushButton:hover {{
+                background-color: {card_hover};
+            }}
+
+            QPushButton:pressed {{
+                background-color: {control_bg};
+            }}
+
+            QPushButton#dangerButton {{
+                background-color: {danger};
+                color: {white};
+                border: none;
+            }}
+
+            QPushButton#dangerButton:hover {{
+                background-color: {danger_hover};
+            }}
+
+            QCheckBox {{
+                color: {text};
+                font-size: 12px;
+                spacing: 8px;
+                margin-top: 14px;
+            }}
+
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border-radius: 4px;
+                border: 1px solid {border};
+                background-color: {input_bg};
+            }}
+
+            QCheckBox::indicator:checked {{
+                background-color: {accent};
+                border-color: {accent};
+            }}
+
+            QScrollArea {{
+                border: none;
+                background: transparent;
+            }}
+
+            QScrollBar:vertical {{
+                background: transparent;
+                width: 10px;
+                margin: 2px;
+            }}
+
+            QScrollBar::handle:vertical {{
+                background: {border};
+                border-radius: 5px;
+                min-height: 30px;
+            }}
+
+            QScrollBar::handle:vertical:hover {{
+                background: {accent_hover};
+            }}
+
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{
+                height: 0;
+            }}
+            """
+        )

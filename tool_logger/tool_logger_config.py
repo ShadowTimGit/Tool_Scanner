@@ -1,7 +1,7 @@
 import os
 import json
 
-from config import (
+from settings_menu.config import (
     OUTPUT_DIR,
     SETTINGS_FILE,
 )

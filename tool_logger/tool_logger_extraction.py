@@ -149,46 +149,46 @@ def extract_tool_info(
     # ------------------------------------------------
 
     if not size_1:
-        size_1 = "n/a"
+        size_1 = "NA"
 
     if not size_2:
-        size_2 = "n/a"
+        size_2 = "NA"
 
     if not brand:
-        brand = "n/a"
+        brand = "NA"
 
     if not part_number:
-        part_number = "n/a"
+        part_number = "NA"
 
     if not measurement:
-        measurement = "n/a"
+        measurement = "NA"
 
     if not drive:
-        drive = "n/a"
+        drive = "NA"
 
     if not point:
-        point = "n/a"
+        point = "NA"
 
     if not specialty_socket:
-        specialty_socket = "n/a"
+        specialty_socket = "NA"
 
     if not invoice:
-        invoice = "n/a"
+        invoice = "DEFAULT"
 
     if not ebay_id:
-        ebay_id = "n/a"
+        ebay_id = "None"
 
     if not estimated_value:
-        estimated_value = "n/a"
+        estimated_value = "NA"
 
     if not number_sold:
-        number_sold = "n/a"
+        number_sold = "1"
 
     if not invoice_price:
-        invoice_price = "n/a"
+        invoice_price = "None"
 
     if not profit:
-        profit = "n/a"
+        profit = "NA"
 
     # ------------------------------------------------
     # Validate date

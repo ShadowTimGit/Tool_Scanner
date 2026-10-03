@@ -1,50 +1,339 @@
-import tkinter as tk
 from fractions import Fraction
 
+from PySide6.QtCore import Signal, Qt
+from PySide6.QtWidgets import (
+    QFrame,
+    QPushButton,
+    QGridLayout,
+    QWidget,
+    QSizePolicy,
+    QLabel,
+)
 
-class FractionDropdown(tk.Frame):
+from GUI.appearance_controller import (
+    INPUT_BG,
+    PANEL_BG,
+    BORDER_COLOR,
+    TEXT_COLOR,
+)
+
+
+class FractionDropdown(QFrame):
+
+    value_changed = Signal(str)
 
     def __init__(
         self,
-        parent,
-        textvariable,
+        parent=None,
+        textvariable=None,
         command=None,
         width=25,
         measurement="SAE",
         dual_measurement=None,
+        appearance_mode="Dark",
         **kwargs,
     ):
-        super().__init__(
-            parent,
-            bd=1,
-            relief="solid",
-            **kwargs,
-        )
+        super().__init__(parent)
 
+        # __init__
+        self.appearance_mode = appearance_mode
         self.textvariable = textvariable
         self.command = command
         self.width = width
         self.measurement = measurement
         self.dual_measurement = dual_measurement
 
-        self.button = tk.Button(
-            self,
-            textvariable=self.textvariable,
-            anchor="w",
-            relief="flat",
-            bd=0,
-            width=width,
-            command=self.toggle_dropdown,
-        )
-
-        self.button.pack(
-            fill=tk.X,
-            padx=2,
-            pady=2,
-        )
+        self._value = ""
 
         self.popup = None
         self.values = []
+
+        self.setFixedHeight(36)
+
+        self.setStyleSheet(
+            f"""
+            QFrame {{
+                background-color: {INPUT_BG[1]};
+                border: 1px solid {BORDER_COLOR[1]};
+                border-radius: 8px;
+            }}
+            """
+        )
+
+        self.create_gui()
+
+    def get_color(self, color):
+        if isinstance(color, tuple):
+            return color[0] if self.appearance_mode == "Light" else color[1]
+        return color
+
+    def set_appearance_mode(self, mode):
+        self.appearance_mode = mode.capitalize()
+
+        if self.appearance_mode not in (
+            "Light",
+            "Dark",
+        ):
+            self.appearance_mode = "Dark"
+
+        self.refresh_dropdown_theme()
+
+        if self.popup is not None:
+            self.close_popup()
+
+    # =========================================================
+    # GUI
+    # =========================================================
+
+    def create_gui(self):
+
+        self.button = QPushButton()
+
+        self.button_label = QLabel(
+            self.get_current_value()
+        )
+
+        self.button_label.setAlignment(
+            Qt.AlignLeft | Qt.AlignVCenter
+        )
+
+        self.button_label.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Expanding,
+        )
+
+        self.button.setCursor(
+            Qt.PointingHandCursor
+        )
+
+        self.button.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Expanding,
+        )
+
+        self.button.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {INPUT_BG[1]};
+                color: {TEXT_COLOR[1]};
+                border: none;
+                border-radius: 7px;
+                padding: 0px;
+            }}
+
+            QPushButton:hover {{
+                background-color: {BORDER_COLOR[1]};
+            }}
+            """
+        )
+
+        self.button_label.setStyleSheet(
+            f"""
+            QLabel {{
+                background-color: transparent;
+                color: {TEXT_COLOR[1]};
+                border: none;
+                padding-left: 8px;
+                padding-right: 8px;
+            }}
+            """
+        )
+
+        self.button.clicked.connect(
+            self.toggle_dropdown
+        )
+
+        self.arrow_button = QPushButton(
+            "▼"
+        )
+
+        self.arrow_button.setFixedWidth(
+            28
+        )
+
+        self.arrow_button.setCursor(
+            Qt.PointingHandCursor
+        )
+
+        self.arrow_button.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {INPUT_BG[1]};
+                color: {TEXT_COLOR[1]};
+                border: none;
+                border-radius: 7px;
+                font-size: 10px;
+            }}
+
+            QPushButton:hover {{
+                background-color: {BORDER_COLOR[1]};
+            }}
+            """
+        )
+
+        self.arrow_button.clicked.connect(
+            self.toggle_dropdown
+        )
+
+        from PySide6.QtWidgets import QHBoxLayout
+
+        button_layout = QHBoxLayout(
+            self.button
+        )
+
+        button_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
+        )
+
+        button_layout.setSpacing(0)
+
+        button_layout.addWidget(
+            self.button_label
+        )
+
+        layout = QHBoxLayout(self)
+
+        layout.setContentsMargins(
+            1,
+            1,
+            1,
+            1,
+        )
+
+        layout.setSpacing(0)
+
+        layout.addWidget(
+            self.button,
+            1,
+        )
+
+        layout.addWidget(
+            self.arrow_button
+        )
+
+
+
+
+    # =========================================================
+    # Theme
+    # =========================================================
+
+
+    def refresh_dropdown_theme(self):
+
+        input_bg = self.get_color(INPUT_BG)
+        panel_bg = self.get_color(PANEL_BG)
+        border = self.get_color(BORDER_COLOR)
+        text = self.get_color(TEXT_COLOR)
+
+
+        self.setStyleSheet(
+            f"""
+            QFrame {{
+                background-color: {panel_bg};
+                border: 1px solid {border};
+                border-radius: 8px;
+            }}
+            """
+        )
+
+        self.button.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {panel_bg};
+                color: {text};
+                border: none;
+                border-radius: 7px;
+                padding-left: 8px;
+                padding-right: 8px;
+                text-align: left;
+            }}
+
+            QPushButton:hover {{
+                background-color: {border};
+            }}
+            """
+        )
+
+        self.arrow_button.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {panel_bg};
+                color: {text};
+                border: none;
+                border-radius: 7px;
+                font-size: 10px;
+            }}
+
+            QPushButton:hover {{
+                background-color: {border};
+            }}
+            """
+        )
+
+        self.button_label.setStyleSheet(
+            f"""
+            QLabel {{
+                background-color: transparent;
+                color: {text};
+                border: none;
+                padding-left: 8px;
+                padding-right: 8px;
+            }}
+            """
+        )
+
+
+    # =========================================================
+    # Value Variable Compatibility
+    # =========================================================
+
+    def get_current_value(self):
+
+        if self.textvariable is None:
+            return self._value
+
+        if hasattr(
+            self.textvariable,
+            "value",
+        ):
+            return str(
+                self.textvariable.value
+            )
+
+        if callable(self.textvariable):
+            return str(
+                self.textvariable()
+            )
+
+        return str(
+            self.textvariable
+        )
+
+    def set_current_value(self, value):
+
+        value = str(value)
+
+        self._value = value
+
+        if self.textvariable is not None:
+
+            if hasattr(
+                self.textvariable,
+                "set",
+            ):
+                self.textvariable.set(value)
+
+            elif hasattr(
+                self.textvariable,
+                "value",
+            ):
+                self.textvariable.value = value
+
+        self.button_label.setText(value)
 
     # =========================================================
     # Measurement
@@ -66,11 +355,11 @@ class FractionDropdown(tk.Frame):
     # =========================================================
 
     def set_values(self, values):
+
         self.values = list(values)
 
         if self.popup is not None:
-            self.popup.destroy()
-            self.popup = None
+            self.close_popup()
 
     # =========================================================
     # Dropdown
@@ -82,27 +371,62 @@ class FractionDropdown(tk.Frame):
             self.close_popup()
             return
 
-        if not self.values and self.measurement != "Other":
+        if (
+            not self.values
+            and self.measurement != "Other"
+        ):
             return
 
-        self.popup = tk.Toplevel(self)
-        self.popup.overrideredirect(True)
+        panel_bg = self.get_color(PANEL_BG)
+        border = self.get_color(BORDER_COLOR)
+        text = self.get_color(TEXT_COLOR)
 
-        x = self.winfo_rootx()
-        y = self.winfo_rooty() + self.winfo_height()
-
-        self.popup.geometry(
-            f"+{x}+{y}"
+        self.popup = QWidget(
+            None,
+            Qt.Tool | Qt.FramelessWindowHint,
         )
 
-        frame = tk.Frame(
-            self.popup,
-            bd=1,
-            relief="solid",
-            bg="white",
+        self.popup.setAttribute(
+            Qt.WA_TranslucentBackground
         )
 
-        frame.pack()
+        self.popup.setStyleSheet(
+            "background: transparent;"
+        )
+
+        x = self.mapToGlobal(
+            self.rect().bottomLeft()
+        ).x()
+
+        y = self.mapToGlobal(
+            self.rect().bottomLeft()
+        ).y()
+
+        frame = QFrame(
+            self.popup
+        )
+
+        frame.setStyleSheet(
+            f"""
+            QFrame {{
+                background-color: {panel_bg};
+                border: 1px solid {border};
+                border-radius: 8px;
+            }}
+            """
+        )
+
+        layout = QGridLayout(frame)
+
+        layout.setContentsMargins(
+            4,
+            4,
+            4,
+            4,
+        )
+
+        layout.setHorizontalSpacing(3)
+        layout.setVerticalSpacing(2)
 
         # =====================================================
         # OTHER / METRIC
@@ -120,10 +444,13 @@ class FractionDropdown(tk.Frame):
             columns = 3
 
             if not self.values:
+                self.close_popup()
                 return
 
             rows = (
-                len(self.values) + columns - 1
+                len(self.values)
+                + columns
+                - 1
             ) // columns
 
             for index, value in enumerate(
@@ -133,66 +460,14 @@ class FractionDropdown(tk.Frame):
                 column = index // rows
                 row = index % rows
 
-                button = tk.Button(
-                    frame,
-                    text=value,
-                    width=12,
-                    anchor="center",
-                    relief="flat",
-                    bg="white",
-                    command=lambda v=value: self.select(v),
+                button = self.create_option_button(
+                    value
                 )
 
-                button.grid(
-                    row=row,
-                    column=column,
-                    padx=2,
-                    pady=1,
-                    sticky="ew",
-                )
-
-
-        # =====================================================
-        # METRIC
-        # =====================================================
-
-        elif (
-            self.measurement == "Metric"
-            or (
-                self.measurement == "DUAL"
-                and self.dual_measurement == "Metric"
-            )
-        ):
-
-            columns = 3
-
-            rows = (
-                len(self.values) + columns - 1
-            ) // columns
-
-            for index, value in enumerate(
-                self.values
-            ):
-
-                column = index // rows
-                row = index % rows
-
-                button = tk.Button(
-                    frame,
-                    text=value,
-                    width=8,
-                    anchor="center",
-                    relief="flat",
-                    bg="white",
-                    command=lambda v=value: self.select(v),
-                )
-
-                button.grid(
-                    row=row,
-                    column=column,
-                    padx=2,
-                    pady=1,
-                    sticky="ew",
+                layout.addWidget(
+                    button,
+                    row,
+                    column,
                 )
 
         # =====================================================
@@ -205,37 +480,25 @@ class FractionDropdown(tk.Frame):
 
                 value = str(value).strip()
 
-                # -------------------------------------------------
-                # Remove trailing double quote from SAE sizes.
-                #
-                # Example:
-                # 1/4" -> 1/4
-                # 1-1/4" -> 1-1/4
-                # 1" -> 1
-                #
-                # This keeps the " from interfering with parsing
-                # while the original value is still displayed.
-                # -------------------------------------------------
-
                 if value.endswith('"'):
                     value = value[:-1].strip()
 
                 try:
 
-                    # -------------------------------------------------
                     # Mixed fraction
-                    # Example: 1-5/8
-                    # -------------------------------------------------
-
                     if "-" in value:
 
-                        whole, fraction = value.split(
-                            "-",
-                            1,
+                        whole, fraction = (
+                            value.split(
+                                "-",
+                                1,
+                            )
                         )
 
                         whole = int(whole)
-                        fraction = Fraction(fraction)
+                        fraction = Fraction(
+                            fraction
+                        )
 
                         return {
                             "value": value,
@@ -243,40 +506,44 @@ class FractionDropdown(tk.Frame):
                                 Fraction(whole)
                                 + fraction
                             ),
-                            "numerator": fraction.numerator,
-                            "denominator": fraction.denominator,
+                            "numerator": (
+                                fraction.numerator
+                            ),
+                            "denominator": (
+                                fraction.denominator
+                            ),
                             "whole": whole,
                             "is_mixed": True,
                         }
 
-                    # -------------------------------------------------
                     # Simple fraction
-                    # Example: 5/8
-                    # -------------------------------------------------
-
                     if "/" in value:
 
-                        fraction = Fraction(value)
+                        fraction = Fraction(
+                            value
+                        )
 
                         return {
                             "value": value,
                             "numeric": fraction,
-                            "numerator": fraction.numerator,
-                            "denominator": fraction.denominator,
+                            "numerator": (
+                                fraction.numerator
+                            ),
+                            "denominator": (
+                                fraction.denominator
+                            ),
                             "whole": 0,
                             "is_mixed": False,
                         }
 
-                    # -------------------------------------------------
                     # Whole number
-                    # Example: 1
-                    # -------------------------------------------------
-
                     whole = int(value)
 
                     return {
                         "value": value,
-                        "numeric": Fraction(whole),
+                        "numeric": Fraction(
+                            whole
+                        ),
                         "numerator": 0,
                         "denominator": 1,
                         "whole": whole,
@@ -289,9 +556,9 @@ class FractionDropdown(tk.Frame):
                 ):
                     return None
 
-            # =====================================================
+            # =================================================
             # SEPARATE VALUES INTO PHASES
-            # =====================================================
+            # =================================================
 
             na_value = None
             fraction_groups = {}
@@ -302,7 +569,13 @@ class FractionDropdown(tk.Frame):
 
             for value in self.values:
 
-                if str(value).strip().upper() == "NA":
+                if (
+                    str(value)
+                    .strip()
+                    .upper()
+                    == "NA"
+                ):
+
                     na_value = {
                         "value": str(value),
                         "numeric": Fraction(0),
@@ -311,6 +584,7 @@ class FractionDropdown(tk.Frame):
                         "whole": 0,
                         "is_mixed": False,
                     }
+
                     continue
 
                 parsed = parse_sae(value)
@@ -319,12 +593,11 @@ class FractionDropdown(tk.Frame):
                     continue
 
                 numeric = parsed["numeric"]
-                denominator = parsed["denominator"]
+                denominator = parsed[
+                    "denominator"
+                ]
 
-                # -------------------------------------------------
                 # Fractions less than 1
-                # -------------------------------------------------
-
                 if numeric < 1:
 
                     fraction_groups.setdefault(
@@ -334,20 +607,14 @@ class FractionDropdown(tk.Frame):
 
                     continue
 
-                # -------------------------------------------------
                 # Exactly 1
-                # -------------------------------------------------
-
                 if numeric == 1:
 
                     one_value = parsed
 
                     continue
 
-                # -------------------------------------------------
                 # Mixed fractions greater than 1
-                # -------------------------------------------------
-
                 if parsed["is_mixed"]:
 
                     mixed_groups.setdefault(
@@ -357,62 +624,58 @@ class FractionDropdown(tk.Frame):
 
                     continue
 
-                # -------------------------------------------------
                 # Whole numbers greater than 1
-                # -------------------------------------------------
-
                 whole_numbers.append(parsed)
 
-            # =====================================================
+            # =================================================
             # SORT FRACTION GROUPS
-            # =====================================================
+            # =================================================
 
             for denominator in fraction_groups:
 
-                fraction_groups[denominator].sort(
-                    key=lambda item: item["numeric"]
+                fraction_groups[
+                    denominator
+                ].sort(
+                    key=lambda item: item[
+                        "numeric"
+                    ]
                 )
 
-            # =====================================================
+            # =================================================
             # SORT MIXED FRACTION GROUPS
-            # =====================================================
+            # =================================================
 
             for denominator in mixed_groups:
 
-                mixed_groups[denominator].sort(
-                    key=lambda item: item["numeric"]
+                mixed_groups[
+                    denominator
+                ].sort(
+                    key=lambda item: item[
+                        "numeric"
+                    ]
                 )
 
-            # =====================================================
+            # =================================================
             # CREATE ORDERED GROUPS
-            # =====================================================
+            # =================================================
 
             ordered_groups = []
 
-            # -----------------------------------------------------
-            # NA
-            # -----------------------------------------------------
-
             if na_value is not None:
+
                 ordered_groups.append(
                     [na_value]
                 )
-
-            # -----------------------------------------------------
-            # Fractions below 1
-            # -----------------------------------------------------
 
             for denominator in sorted(
                 fraction_groups
             ):
 
                 ordered_groups.append(
-                    fraction_groups[denominator]
+                    fraction_groups[
+                        denominator
+                    ]
                 )
-
-            # -----------------------------------------------------
-            # Exactly 1
-            # -----------------------------------------------------
 
             if one_value is not None:
 
@@ -420,24 +683,24 @@ class FractionDropdown(tk.Frame):
                     [one_value]
                 )
 
-            # -----------------------------------------------------
-            # Mixed fractions
-            # -----------------------------------------------------
-
             for denominator in sorted(
                 mixed_groups
             ):
 
                 ordered_groups.append(
-                    mixed_groups[denominator]
+                    mixed_groups[
+                        denominator
+                    ]
                 )
 
-            # =====================================================
+            # =================================================
             # WHOLE NUMBERS
-            # =====================================================
+            # =================================================
 
             whole_numbers.sort(
-                key=lambda item: item["numeric"]
+                key=lambda item: item[
+                    "numeric"
+                ]
             )
 
             if whole_numbers:
@@ -446,9 +709,9 @@ class FractionDropdown(tk.Frame):
                     whole_numbers
                 )
 
-            # =====================================================
+            # =================================================
             # BUILD COLUMNS
-            # =====================================================
+            # =================================================
 
             columns = []
             current_column = []
@@ -459,7 +722,9 @@ class FractionDropdown(tk.Frame):
 
                 for item in group:
 
-                    current_column.append(item)
+                    current_column.append(
+                        item
+                    )
 
                     if (
                         len(current_column)
@@ -478,9 +743,9 @@ class FractionDropdown(tk.Frame):
                     current_column
                 )
 
-            # =====================================================
+            # =================================================
             # DISPLAY COLUMNS
-            # =====================================================
+            # =================================================
 
             for (
                 column_index,
@@ -493,57 +758,129 @@ class FractionDropdown(tk.Frame):
 
                     value = item["value"]
 
-                    # -------------------------------------------------
-                    # Restore the double quote for display.
-                    #
-                    # The stored/configured value remains:
-                    #     1/4"
-                    #
-                    # But parsing above safely removes it first.
-                    # -------------------------------------------------
+                    if (
+                        str(value)
+                        .strip()
+                        .upper()
+                        == "NA"
+                    ):
 
-                    if str(value).strip().upper() == "NA":
                         display_value = value
 
                     elif (
-                        self.measurement == "DUAL"
-                        and self.dual_measurement == "SAE"
+                        self.measurement
+                        == "DUAL"
+                        and self.dual_measurement
+                        == "SAE"
                     ):
-                        display_value = f'{value}"'
 
-                    elif self.measurement == "SAE":
                         display_value = (
                             f'{value}"'
-                            if not value.endswith('"')
+                        )
+
+                    elif (
+                        self.measurement
+                        == "SAE"
+                    ):
+
+                        display_value = (
+                            f'{value}"'
+                            if not value.endswith(
+                                '"'
+                            )
                             else value
                         )
 
                     else:
+
                         display_value = value
 
-                    button = tk.Button(
-                        frame,
-                        text=display_value,
-                        width=8,
-                        anchor="center",
-                        relief="flat",
-                        bg="white",
-                        command=lambda v=display_value: self.select(v),
-)
-                    button.grid(
-                        row=row,
-                        column=column_index,
-                        padx=2,
-                        pady=1,
-                        sticky="ew",
+                    button = (
+                        self.create_option_button(
+                            display_value,
+                            width=70,
+                        )
                     )
 
-        self.popup.bind(
-            "<FocusOut>",
-            lambda event: self.close_popup(),
+                    layout.addWidget(
+                        button,
+                        row,
+                        column_index,
+                    )
+
+        self.popup.adjustSize()
+
+        frame.adjustSize()
+
+        self.popup.resize(
+            frame.sizeHint()
         )
 
-        self.popup.focus_set()
+        frame.setGeometry(
+            0,
+            0,
+            frame.sizeHint().width(),
+            frame.sizeHint().height(),
+        )
+
+        self.popup.move(
+            x,
+            y,
+        )
+
+        self.popup.show()
+
+        self.popup.activateWindow()
+        self.popup.setFocus()
+
+    # =========================================================
+    # Option Button
+    # =========================================================
+
+    def create_option_button(
+        self,
+        value,
+        width=100,
+    ):
+
+        border = self.get_color(BORDER_COLOR)
+        text = self.get_color(TEXT_COLOR)
+
+        button = QPushButton(
+            str(value)
+        )
+
+        button.setFixedSize(
+            width,
+            30,
+        )
+
+        button.setCursor(
+            Qt.PointingHandCursor
+        )
+
+        button.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {text};
+                border: none;
+                border-radius: 5px;
+                padding: 2px;
+            }}
+
+            QPushButton:hover {{
+                background-color: {border};
+            }}
+            """
+        )
+
+        button.clicked.connect(
+            lambda checked=False, v=value:
+            self.select(v)
+        )
+
+        return button
 
     # =========================================================
     # Selection
@@ -551,11 +888,15 @@ class FractionDropdown(tk.Frame):
 
     def select(self, value):
 
-        self.textvariable.set(
+        self.set_current_value(
             value
         )
 
         self.close_popup()
+
+        self.value_changed.emit(
+            str(value)
+        )
 
         if self.command is not None:
             self.command()
@@ -568,7 +909,9 @@ class FractionDropdown(tk.Frame):
 
         if self.popup is not None:
 
-            self.popup.destroy()
+            self.popup.close()
+            self.popup.deleteLater()
+
             self.popup = None
 
     # =========================================================
@@ -576,9 +919,11 @@ class FractionDropdown(tk.Frame):
     # =========================================================
 
     def set(self, value):
-        self.textvariable.set(
+
+        self.set_current_value(
             value
         )
 
     def get(self):
-        return self.textvariable.get()
+
+        return self.get_current_value()

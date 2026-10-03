@@ -1,6 +1,6 @@
 import cv2
 
-from config import (
+from settings_menu.config import (
     DEFAULT_SCAN_WIDTH,
     DEFAULT_SCAN_HEIGHT,
     DEFAULT_HEIGHT_DISPLACEMENT,

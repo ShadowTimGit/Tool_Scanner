@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog
-from config import (
+from settings_menu.config import (
     SETTINGS_FILE,
     OUTPUT_DIR,
 )

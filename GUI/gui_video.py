@@ -1,60 +1,241 @@
 import cv2
-import tkinter as tk
 
-from PIL import Image, ImageTk
+from PySide6.QtCore import (
+    Qt,
+    QTimer,
+)
+from PySide6.QtGui import (
+    QImage,
+    QPixmap,
+)
+from PySide6.QtWidgets import (
+    QFrame,
+    QLabel,
+    QVBoxLayout,
+)
 
+from GUI.appearance_controller import (
+    CONTROL_BG,
+    BORDER_COLOR,
+    TEXT_COLOR,
+)
+
+
+# ==================================================================
+# Video Label
+# ==================================================================
+
+class VideoLabel(QLabel):
+
+    def __init__(self, parent=None, controller=None):
+        super().__init__(parent)
+
+        self.controller = controller
+
+        self.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
+
+        self.setMouseTracking(True)
+
+        self.setCursor(
+            Qt.CursorShape.ArrowCursor
+        )
+
+    # --------------------------------------------------------------
+    # Mouse
+    # --------------------------------------------------------------
+
+    def mousePressEvent(self, event):
+        if self.controller is not None:
+            self.controller.on_mouse_down(event)
+
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.controller is not None:
+            self.controller.on_mouse_move(event)
+
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self.controller is not None:
+            self.controller.on_mouse_up(event)
+
+        super().mouseReleaseEvent(event)
+
+    def enterEvent(self, event):
+        if self.controller is not None:
+            self.controller.on_mouse_motion(
+                None
+            )
+
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.setCursor(
+            Qt.CursorShape.ArrowCursor
+        )
+
+        super().leaveEvent(event)
+
+
+# ==================================================================
+# Video Mixin
+# ==================================================================
 
 class VideoMixin:
 
     def create_video_display(self):
-        self.video_label = tk.Label(
-            self.root,
-            cursor="arrow",
+        self.video_frame = QFrame(
+            self.root
         )
 
-        self.video_label.pack(
-            padx=10,
-            pady=10,
-            fill=tk.BOTH,
-            expand=True,
+        self.video_frame.setObjectName(
+            "videoFrame"
         )
 
-        self.video_label.bind(
-            "<ButtonPress-1>",
-            self.on_mouse_down,
+        self.video_frame.setFrameShape(
+            QFrame.Shape.NoFrame
         )
 
-        self.video_label.bind(
-            "<B1-Motion>",
-            self.on_mouse_move,
+        self.video_layout = QVBoxLayout(
+            self.video_frame
         )
 
-        self.video_label.bind(
-            "<ButtonRelease-1>",
-            self.on_mouse_up,
+        self.video_layout.setContentsMargins(
+            4,
+            4,
+            4,
+            4,
         )
 
-        self.video_label.bind(
-            "<Motion>",
-            self.on_mouse_motion,
+        self.video_layout.setSpacing(0)
+
+        self.video_label = VideoLabel(
+            self.video_frame,
+            controller=self,
         )
+
+        self.video_layout.addWidget(
+            self.video_label
+        )
+
+        # ----------------------------------------------------------
+        # Theme
+        # ----------------------------------------------------------
+
+        self.refresh_video_theme()
+
+        # ----------------------------------------------------------
+        # Layout
+        # ----------------------------------------------------------
+
+        self.camera_layout.addWidget(
+            self.video_frame,
+            1,
+        )
+
+        # ----------------------------------------------------------
+        # Video state
+        # ----------------------------------------------------------
+
+        self.current_frame_width = 0
+        self.current_frame_height = 0
+
+        self.display_width = 0
+        self.display_height = 0
+
+        self.video_pixmap = None
+
+        # ----------------------------------------------------------
+        # Timer
+        # ----------------------------------------------------------
+
+        self.video_timer = QTimer(
+            self.root
+        )
+
+        self.video_timer.setInterval(
+            33
+        )
+
+        self.video_timer.timeout.connect(
+            self.update_frame
+        )
+
+    def refresh_video_theme(self):
+        if not hasattr(
+            self,
+            "video_frame",
+        ):
+            return
+
+        control_bg = self._get_color(
+            CONTROL_BG
+        )
+
+        border = self._get_color(
+            BORDER_COLOR
+        )
+
+        text = self._get_color(
+            TEXT_COLOR
+        )
+
+        self.video_frame.setStyleSheet(
+            f"""
+            QFrame#videoFrame {{
+                background-color: {control_bg};
+                border: 1px solid {border};
+                border-radius: 12px;
+            }}
+            """
+        )
+
+        if hasattr(
+            self,
+            "video_label",
+        ):
+
+            self.video_label.setStyleSheet(
+                f"""
+                QLabel {{
+                    background-color: {control_bg};
+                    color: {text};
+                    border: none;
+                }}
+                """
+            )
+
+    # ==================================================================
+    # Start / Stop
+    # ==================================================================
+
+    def start_video_update(self):
+        if not self.video_timer.isActive():
+            self.video_timer.start()
+
+    def stop_video_update(self):
+        if self.video_timer.isActive():
+            self.video_timer.stop()
+
+    # ==================================================================
+    # Update Frame
+    # ==================================================================
 
     def update_frame(self):
         if not self.running:
             return
 
         if not self.camera_ready:
-            self.root.after(
-                50,
-                self.update_frame,
-            )
             return
 
         frame = self.camera.read_frame()
 
         if frame is None:
-            self.status_label.config(
-                text="Video ended."
+            self.status_label.setText(
+                "Video ended."
             )
             return
 
@@ -63,56 +244,123 @@ class VideoMixin:
         )
 
         self.update_capture_count()
-        self.display_frame(processed_frame)
 
-        self.root.after(
-            10,
-            self.update_frame,
+        self.display_frame(
+            processed_frame
         )
+
+    # ==================================================================
+    # Capture Count
+    # ==================================================================
 
     def update_capture_count(self):
         if self.camera is None:
             return
 
-        self.count_label.config(
-            text=(
-                f"Crops: "
-                f"{self.camera.crop_number - 1}"
-            )
+        self.count_label.setText(
+            f"Crops: "
+            f"{self.camera.crop_number - 1}"
         )
 
-    def display_frame(self, frame):
-        frame_height, frame_width = frame.shape[:2]
+    # ==================================================================
+    # Display Frame
+    # ==================================================================
 
-        self.current_frame_width = frame_width
-        self.current_frame_height = frame_height
+    def display_frame(self, frame):
+        frame_height, frame_width = (
+            frame.shape[:2]
+        )
+
+        self.current_frame_width = (
+            frame_width
+        )
+
+        self.current_frame_height = (
+            frame_height
+        )
+
+        # --------------------------------------------------------------
+        # OpenCV BGR -> RGB
+        # --------------------------------------------------------------
 
         frame_rgb = cv2.cvtColor(
             frame,
             cv2.COLOR_BGR2RGB,
         )
 
-        image = Image.fromarray(frame_rgb)
+        # --------------------------------------------------------------
+        # QImage
+        # --------------------------------------------------------------
 
-        image.thumbnail(
-            (1050, 650),
-            Image.Resampling.LANCZOS,
+        bytes_per_line = (
+            frame_rgb.strides[0]
         )
 
-        self.display_width = image.width
-        self.display_height = image.height
+        image = QImage(
+            frame_rgb.data,
+            frame_width,
+            frame_height,
+            bytes_per_line,
+            QImage.Format.Format_RGB888,
+        ).copy()
 
-        photo = ImageTk.PhotoImage(
-            image=image
+        # --------------------------------------------------------------
+        # Calculate display size
+        # --------------------------------------------------------------
+
+        max_width = min(
+            1050,
+            max(
+                1,
+                self.video_label.width(),
+            ),
         )
 
-        self.video_label.configure(
-            image=photo
+        max_height = min(
+            650,
+            max(
+                1,
+                self.video_label.height(),
+            ),
         )
 
-        self.video_label.image = photo
+        scaled_image = image.scaled(
+            max_width,
+            max_height,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.FastTransformation,
+        )
+
+        self.display_width = (
+            scaled_image.width()
+        )
+
+        self.display_height = (
+            scaled_image.height()
+        )
+
+        # --------------------------------------------------------------
+        # QPixmap
+        # --------------------------------------------------------------
+
+        pixmap = QPixmap.fromImage(
+            scaled_image
+        )
+
+        self.video_pixmap = pixmap
+
+        self.video_label.setPixmap(
+            pixmap
+        )
+
+    # ==================================================================
+    # Display -> Frame Coordinates
+    # ==================================================================
 
     def display_to_frame_coordinates(self, event):
+        if event is None:
+            return None
+
         if (
             self.current_frame_width <= 0
             or self.current_frame_height <= 0
@@ -121,19 +369,35 @@ class VideoMixin:
         ):
             return None
 
-        label_width = self.video_label.winfo_width()
-        label_height = self.video_label.winfo_height()
+        label_width = (
+            self.video_label.width()
+        )
+
+        label_height = (
+            self.video_label.height()
+        )
 
         offset_x = (
-            label_width - self.display_width
+            label_width
+            - self.display_width
         ) // 2
 
         offset_y = (
-            label_height - self.display_height
+            label_height
+            - self.display_height
         ) // 2
 
-        image_x = event.x - offset_x
-        image_y = event.y - offset_y
+        position = event.position()
+
+        image_x = (
+            position.x()
+            - offset_x
+        )
+
+        image_y = (
+            position.y()
+            - offset_y
+        )
 
         if (
             image_x < 0
@@ -153,8 +417,13 @@ class VideoMixin:
             / self.display_height
         )
 
-        frame_x = int(image_x * scale_x)
-        frame_y = int(image_y * scale_y)
+        frame_x = int(
+            image_x * scale_x
+        )
+
+        frame_y = int(
+            image_y * scale_y
+        )
 
         frame_x = max(
             0,
@@ -174,12 +443,18 @@ class VideoMixin:
 
         return frame_x, frame_y
 
+    # ==================================================================
+    # Mouse Down
+    # ==================================================================
+
     def on_mouse_down(self, event):
         if self.camera is None:
             return
 
-        coordinates = self.display_to_frame_coordinates(
-            event
+        coordinates = (
+            self.display_to_frame_coordinates(
+                event
+            )
         )
 
         if coordinates is None:
@@ -195,12 +470,18 @@ class VideoMixin:
             None,
         )
 
+    # ==================================================================
+    # Mouse Move
+    # ==================================================================
+
     def on_mouse_move(self, event):
         if self.camera is None:
             return
 
-        coordinates = self.display_to_frame_coordinates(
-            event
+        coordinates = (
+            self.display_to_frame_coordinates(
+                event
+            )
         )
 
         if coordinates is None:
@@ -208,24 +489,41 @@ class VideoMixin:
 
         x, y = coordinates
 
+        buttons = event.buttons()
+
+        if buttons & Qt.MouseButton.LeftButton:
+            flags = cv2.EVENT_FLAG_LBUTTON
+        else:
+            flags = 0
+
         self.camera.mouse_callback(
             cv2.EVENT_MOUSEMOVE,
             x,
             y,
-            cv2.EVENT_FLAG_LBUTTON,
+            flags,
             None,
         )
+
+        self.update_mouse_cursor(
+            x,
+            y,
+        )
+
+    # ==================================================================
+    # Mouse Up
+    # ==================================================================
 
     def on_mouse_up(self, event):
         if self.camera is None:
             return
 
-        coordinates = self.display_to_frame_coordinates(
-            event
+        coordinates = (
+            self.display_to_frame_coordinates(
+                event
+            )
         )
 
         if coordinates is None:
-            # Still release the mouse state.
             self.camera.mouse_callback(
                 cv2.EVENT_LBUTTONUP,
                 0,
@@ -245,30 +543,76 @@ class VideoMixin:
             None,
         )
 
+    # ==================================================================
+    # Mouse Motion
+    # ==================================================================
+
     def on_mouse_motion(self, event):
-        coordinates = self.display_to_frame_coordinates(
-            event
+        if event is None:
+            self.video_label.setCursor(
+                Qt.CursorShape.ArrowCursor
+            )
+            return
+
+        coordinates = (
+            self.display_to_frame_coordinates(
+                event
+            )
         )
 
         if coordinates is None:
-            self.video_label.config(
-                cursor="arrow"
+            self.video_label.setCursor(
+                Qt.CursorShape.ArrowCursor
             )
             return
 
         x, y = coordinates
 
-        cursor = self.get_box_cursor(x, y)
-
-        self.video_label.config(
-            cursor=cursor
+        self.update_mouse_cursor(
+            x,
+            y,
         )
+
+    # ==================================================================
+    # Cursor
+    # ==================================================================
+
+    def update_mouse_cursor(self, x, y):
+        cursor = self.get_box_cursor(
+            x,
+            y,
+        )
+
+        if cursor == "sizing":
+            self.video_label.setCursor(
+                Qt.CursorShape.SizeAllCursor
+            )
+
+        elif cursor == "fleur":
+            self.video_label.setCursor(
+                Qt.CursorShape.SizeAllCursor
+            )
+
+        else:
+            self.video_label.setCursor(
+                Qt.CursorShape.ArrowCursor
+            )
+
+    # ==================================================================
+    # Box Cursor
+    # ==================================================================
 
     def get_box_cursor(self, x, y):
         if self.camera is None:
             return ""
 
-        box_manager = self.camera.box_manager
+        box_manager = (
+            self.camera.box_manager
+        )
+
+        # --------------------------------------------------------------
+        # Scan Box
+        # --------------------------------------------------------------
 
         if (
             box_manager.show_scan_box
@@ -279,8 +623,7 @@ class VideoMixin:
                     box_manager.scan_box,
                     x,
                     y,
-                )
-                is not None
+                ) is not None
             ):
                 return "sizing"
 
@@ -291,6 +634,10 @@ class VideoMixin:
             ):
                 return "fleur"
 
+        # --------------------------------------------------------------
+        # Crop Box
+        # --------------------------------------------------------------
+
         if (
             box_manager.show_crop_box
             and box_manager.crop_box is not None
@@ -300,8 +647,7 @@ class VideoMixin:
                     box_manager.crop_box,
                     x,
                     y,
-                )
-                is not None
+                ) is not None
             ):
                 return "sizing"
 
@@ -312,6 +658,10 @@ class VideoMixin:
             ):
                 return "fleur"
 
+        # --------------------------------------------------------------
+        # Counting Box
+        # --------------------------------------------------------------
+
         if (
             box_manager.show_counting_box
             and box_manager.counting_box is not None
@@ -321,8 +671,7 @@ class VideoMixin:
                     box_manager.counting_box,
                     x,
                     y,
-                )
-                is not None
+                ) is not None
             ):
                 return "sizing"
 

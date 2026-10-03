@@ -3,15 +3,13 @@ import os
 import torch
 from ultralytics import YOLO
 
-from config import MODEL
-from performance_debug import time_block
-
+from settings_menu.config import MODEL
 
 # ==================================================
 # Detection Settings
 # ==================================================
 
-MIN_FRAMES = 7
+MIN_FRAMES = 10
 
 MIN_WIDTH = 30
 MIN_HEIGHT = 30
@@ -25,17 +23,28 @@ MAX_MISSED_FRAMES = 6
 
 
 def get_model_device():
-    requested = os.getenv("TOOL_SCANNER_DEVICE", "").strip().lower()
+    requested = os.getenv(
+        "TOOL_SCANNER_DEVICE",
+        "",
+    ).strip().lower()
 
     if requested:
         if requested in {"cpu", "cuda", "mps"}:
             return requested
-        return "cuda" if torch.cuda.is_available() else "cpu"
+
+        return (
+            "cuda"
+            if torch.cuda.is_available()
+            else "cpu"
+        )
 
     if torch.cuda.is_available():
         return "cuda"
 
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    if (
+        hasattr(torch.backends, "mps")
+        and torch.backends.mps.is_available()
+    ):
         return "mps"
 
     return "cpu"
@@ -50,8 +59,17 @@ class ObjectTracker:
         # -------------------------
 
         self.device = get_model_device()
-        print(f"[ToolScanner] YOLO device: {self.device}")
-        print(f"[ToolScanner] YOLO model: {MODEL}")
+
+        print(
+            f"[ToolScanner] YOLO device: "
+            f"{self.device}"
+        )
+
+        print(
+            f"[ToolScanner] YOLO model: "
+            f"{MODEL}"
+        )
+
         self.model = YOLO(MODEL)
         self.model.to(self.device)
 
@@ -71,20 +89,17 @@ class ObjectTracker:
         frame,
     ):
 
-        with time_block(
-            "tracker.detect.model_track",
-            frame_shape=frame.shape[:2],
-        ):
-            results = self.model.track(
-                frame,
-                conf=CONFIDENCE,
-                tracker=TRACKER_CONFIG,
-                persist=True,
-                verbose=False,
-                device=self.device,
-            )
-
+        results = self.model.track(
+            frame,
+            conf=CONFIDENCE,
+            tracker=TRACKER_CONFIG,
+            persist=True,
+            verbose=False,
+            device=self.device,
+        )
+        
         detections = []
+
         model_names = self.model.names
 
         for result in results:
@@ -114,6 +129,10 @@ class ObjectTracker:
                 h = int(y2 - y1)
 
                 area = w * h
+
+                # -------------------------
+                # Size filtering
+                # -------------------------
 
                 if w < MIN_WIDTH:
                     continue
@@ -182,155 +201,151 @@ class ObjectTracker:
                     }
                 )
 
-        return detections
+        # -------------------------
+        # Update persistent tracker
+        # -------------------------
 
+        return detections
 
     # ==================================================
     # Update Objects
     # ==================================================
 
-    def update(
-        self,
-        detections,
-    ):
-
+    def update(self, detections):
         visible_ids = set()
 
         for detection in detections:
-
             object_id = detection["id"]
 
-            # YOLO has not assigned an ID yet
             if object_id is None:
                 continue
 
             visible_ids.add(object_id)
 
-            # -------------------------
-            # Existing object
-            # -------------------------
-
             if object_id in self.objects:
+                obj = self.objects[object_id]
 
-                obj = self.objects[
-                    object_id
-                ]
+                obj["x"] = detection["x"]
+                obj["y"] = detection["y"]
+                obj["w"] = detection["w"]
+                obj["h"] = detection["h"]
 
-                obj.update(
-                    detection
+                obj["center_x"] = (
+                    detection["center_x"]
+                )
+
+                obj["center_y"] = (
+                    detection["center_y"]
                 )
 
                 obj["frames"] += 1
                 obj["missed_frames"] = 0
 
-                # -------------------------
-                # Keep largest bounding box
-                # -------------------------
-
-                old_area = (
-                    obj["best_w"]
-                    * obj["best_h"]
-                )
-
-                new_area = (
+                current_area = (
                     detection["w"]
                     * detection["h"]
                 )
 
-                if new_area > old_area:
+                best_area = (
+                    obj["best_w"]
+                    * obj["best_h"]
+                )
 
-                    obj["best_x"] = (
-                        detection["x"]
-                    )
-
-                    obj["best_y"] = (
-                        detection["y"]
-                    )
-
-                    obj["best_w"] = (
-                        detection["w"]
-                    )
-
-                    obj["best_h"] = (
-                        detection["h"]
-                    )
-
-            # -------------------------
-            # New YOLO / ByteTrack object
-            # -------------------------
+                if current_area > best_area:
+                    obj["best_x"] = detection["x"]
+                    obj["best_y"] = detection["y"]
+                    obj["best_w"] = detection["w"]
+                    obj["best_h"] = detection["h"]
 
             else:
-
-                self.objects[
-                    object_id
-                ] = {
-
-                    **detection,
-
+                self.objects[object_id] = {
+                    "id": object_id,
+                    "x": detection["x"],
+                    "y": detection["y"],
+                    "w": detection["w"],
+                    "h": detection["h"],
+                    "center_x": detection["center_x"],
+                    "center_y": detection["center_y"],
                     "frames": 1,
-
                     "missed_frames": 0,
-
                     "captured": False,
-
-                    "best_x": (
-                        detection["x"]
-                    ),
-
-                    "best_y": (
-                        detection["y"]
-                    ),
-
-                    "best_w": (
-                        detection["w"]
-                    ),
-
-                    "best_h": (
-                        detection["h"]
-                    ),
+                    "best_x": detection["x"],
+                    "best_y": detection["y"],
+                    "best_w": detection["w"],
+                    "best_h": detection["h"],
+                    "class_name": detection.get("class_name"),
+                    "class_id": detection.get("class_id"),
+                    "confidence": detection.get("confidence", 0),
                 }
 
-        # -------------------------
-        # Handle objects missing
-        # from current frame
-        # -------------------------
-
-        for object_id in list(
-            self.objects.keys()
-        ):
+        # Only increment missed_frames when YOLO actually ran.
+        for object_id in list(self.objects.keys()):
 
             if object_id in visible_ids:
                 continue
 
-            obj = self.objects[
-                object_id
-            ]
-
-            obj["missed_frames"] += 1
-
-            # -------------------------
-            # Remove stale object
-            # -------------------------
+            self.objects[object_id]["missed_frames"] += 1
 
             if (
-                obj["missed_frames"]
+                self.objects[object_id]["missed_frames"]
                 > MAX_MISSED_FRAMES
             ):
+                del self.objects[object_id]
 
-                del self.objects[
-                    object_id
+        return self.objects
+
+    def get_visible_objects(self):
+
+        visible_objects = []
+
+        for object_id, obj in self.objects.items():
+
+            # -------------------------
+            # Copy object so the
+            # persistent state is not
+            # accidentally modified
+            # by the drawing code.
+            # -------------------------
+
+            visible_object = dict(obj)
+
+            # -------------------------
+            # If ByteTrack missed the
+            # object, retain its last
+            # known bounding box.
+            # -------------------------
+
+            if obj["missed_frames"] > 0:
+
+                visible_object["x"] = obj[
+                    "x"
                 ]
 
-        return self.objects
+                visible_object["y"] = obj[
+                    "y"
+                ]
 
+                visible_object["w"] = obj[
+                    "w"
+                ]
 
-    # ==================================================
-    # Get Objects
-    # ==================================================
+                visible_object["h"] = obj[
+                    "h"
+                ]
 
-    def get_objects(self):
+                visible_object["center_x"] = (
+                    obj["center_x"]
+                )
 
-        return self.objects
+                visible_object["center_y"] = (
+                    obj["center_y"]
+                )
+
+            visible_objects.append(
+                visible_object
+            )
+
+        return visible_objects
 
 
     # ==================================================
@@ -341,6 +356,12 @@ class ObjectTracker:
 
         self.objects = {}
 
-        # Reset YOLO / ByteTrack tracker
+        # -------------------------
+        # Reset YOLO / ByteTrack
+        # -------------------------
+
         self.model = YOLO(MODEL)
-        self.model.to(self.device)
+
+        self.model.to(
+            self.device
+        )

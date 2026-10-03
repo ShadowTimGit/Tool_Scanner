@@ -1,7 +1,7 @@
 import json
 import os
 
-from config import (
+from settings_menu.config import (
     DEFAULT_BOX,
     DEFAULT_CROP,
     DEFAULT_CAMERA_WIDTH,

@@ -1,22 +1,61 @@
-import tkinter as tk
-import tkinter.ttk as ttk
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont, QShortcut, QKeySequence
+from PySide6.QtWidgets import (
+    QWidget,
+    QFrame,
+    QLabel,
+    QPushButton,
+    QCheckBox,
+    QComboBox,
+    QScrollArea,
+    QHBoxLayout,
+    QVBoxLayout,
+    QSizePolicy,
+    QStyle,
+    QStyleOptionButton,
+)
+
+from PySide6.QtGui import QPainter, QPen
+
 import cv2
 import json
 import os
 
 from GUI.gui_constants import (
-    CROP_MODE_EXPANDED,
-    CROP_MODE_OBJECTS,
-    CROP_MODE_PREVIEW,
     CROP_MODE_FULL,
+    CROP_MODE_PREVIEW,
     TRIGGER_MANUAL,
     TRIGGER_AUTOMATIC,
     TRIGGER_CONTINUOUS,
 )
 
-from config import SETTINGS_FILE
-from config import DEFAULT_VIDEO_SOURCE
+from settings_menu.config import (
+    SETTINGS_FILE,
+    DEFAULT_VIDEO_SOURCE,
+)
 
+from GUI.appearance_controller import (
+    CONTROL_BG,
+    PANEL_BG,
+    CARD_BG,
+    CARD_HOVER,
+    INPUT_BG,
+    BORDER_COLOR,
+    TEXT_COLOR,
+    MUTED_TEXT,
+    ACCENT_COLOR,
+    ACCENT_HOVER,
+    DANGER_COLOR,
+    DANGER_HOVER,
+    INVERTED_TEXT,
+    WHITE_TEXT,
+    BLACK_TEXT,
+)
+
+
+# ==================================================================
+# Video Sources
+# ==================================================================
 
 def get_available_video_sources(max_sources=10):
     available = []
@@ -34,87 +73,288 @@ def get_available_video_sources(max_sources=10):
 
     return available
 
+
+class XCheckBox(QCheckBox):
+    def paintEvent(self, event):
+        super().paintEvent(event)
+
+        if not self.isChecked():
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+
+        indicator_rect = self.style().subElementRect(
+            QStyle.SE_CheckBoxIndicator,
+            option,
+            self,
+        )
+
+        pen = QPen(Qt.white, 2)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+
+        padding = 4
+        left = indicator_rect.left() + padding
+        right = indicator_rect.right() - padding
+        top = indicator_rect.top() + padding
+        bottom = indicator_rect.bottom() - padding
+
+        painter.drawLine(left, top, right, bottom)
+        painter.drawLine(right, top, left, bottom)
+
+        painter.end()
+
+# ==================================================================
+# Controls Mixin
+# ==================================================================
+
 class ControlsMixin:
 
-    def create_below_webcam_frame(self):
-        self.below_webcam_container = tk.Frame(
-            self.root,
-            height=220,
-        )
+    # ------------------------------------------------------------------
+    # Appearance helper
+    # ------------------------------------------------------------------
 
-        self.below_webcam_container.pack(
-            fill=tk.X,
-            padx=10,
-            pady=(0, 10),
-        )
+    def _get_color(self, color):
+        """
+        Resolve a light/dark color tuple.
 
-        self.below_webcam_container.pack_propagate(False)
+        The main application should provide:
 
-        self.below_webcam_canvas = tk.Canvas(
-            self.below_webcam_container,
-            highlightthickness=0,
-        )
+            self.appearance_mode
 
-        self.below_webcam_canvas.pack(
-            side=tk.LEFT,
-            fill=tk.BOTH,
-            expand=True,
-        )
+        with either "Light" or "Dark".
+        """
 
-        self.below_webcam_scrollbar = ttk.Scrollbar(
-            self.below_webcam_container,
-            orient=tk.VERTICAL,
-            command=self.below_webcam_canvas.yview,
-        )
-
-        self.below_webcam_scrollbar.pack(
-            side=tk.RIGHT,
-            fill=tk.Y,
-        )
-
-        self.below_webcam_canvas.configure(
-            yscrollcommand=self.below_webcam_scrollbar.set,
-        )
-
-        self.below_webcam_frame = tk.Frame(
-            self.below_webcam_canvas,
-            bd=2,
-            relief=tk.GROOVE,
-            padx=8,
-            pady=8,
-        )
-
-        self.below_webcam_window = (
-            self.below_webcam_canvas.create_window(
-                (0, 0),
-                window=self.below_webcam_frame,
-                anchor="nw",
+        if isinstance(color, tuple):
+            mode = getattr(
+                self,
+                "appearance_mode",
+                "Dark",
             )
+
+            if mode == "Light":
+                return color[0]
+
+            return color[1]
+
+        return color
+
+    # ------------------------------------------------------------------
+    # Below webcam layout order
+    # ------------------------------------------------------------------
+
+    BELOW_WEBCAM_ORDER = {
+        "control_frame": 30,
+        "status_label": 10,
+        "count_label": 20,
+        "action_buttons_frame": 40,
+    }
+
+    def _add_below_webcam_widget(
+        self,
+        widget,
+        order,
+    ):
+        layout = self.below_webcam_content_layout
+
+        insert_at = layout.count()
+
+        for index in range(layout.count()):
+            item = layout.itemAt(index)
+            existing_widget = item.widget()
+
+            if existing_widget is None:
+                continue
+
+            existing_order = getattr(
+                existing_widget,
+                "_below_webcam_order",
+                float("inf"),
+            )
+
+            if order < existing_order:
+                insert_at = index
+                break
+
+        widget._below_webcam_order = order
+
+        layout.insertWidget(
+            insert_at,
+            widget,
         )
 
-        self.below_webcam_frame.bind(
-            "<Configure>",
-            self.update_below_webcam_scroll_region,
+    # ------------------------------------------------------------------
+    # Font helper
+    # ------------------------------------------------------------------
+
+    def _font(
+        self,
+        size=12,
+        weight=QFont.Normal,
+    ):
+        font = QFont()
+        font.setPointSize(size)
+        font.setWeight(weight)
+        return font
+
+    # ------------------------------------------------------------------
+    # Below webcam container
+    # ------------------------------------------------------------------
+
+    def create_below_webcam_frame(self):
+        self.below_webcam_container = QFrame(
+            self.root
         )
 
-        self.below_webcam_canvas.bind(
-            "<Configure>",
-            self.resize_below_webcam_content,
+        self.below_webcam_container.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Expanding,
         )
 
-        self.below_webcam_canvas.bind(
-            "<MouseWheel>",
-            self.on_below_webcam_mousewheel,
+        self.below_webcam_container.setStyleSheet(
+            f"""
+            QFrame {{
+                background: {self._get_color(CONTROL_BG)};
+                border-radius: 12px;
+            }}
+            """
         )
 
-    def on_video_source_changed(self, event=None):
+        # --------------------------------------------------------------
+        # Main layout
+        # --------------------------------------------------------------
+
+        self.below_webcam_layout = QVBoxLayout(
+            self.below_webcam_container
+        )
+
+        self.below_webcam_layout.setContentsMargins(
+            4,
+            4,
+            4,
+            4,
+        )
+
+        self.below_webcam_layout.setSpacing(5)
+
+        # --------------------------------------------------------------
+        # Add to main application layout
+        # --------------------------------------------------------------
+
+        # self.left_layout.addWidget(
+        #     self.below_webcam_container,
+        #     0,
+        # )
+
+        # --------------------------------------------------------------
+        # Scroll area
+        # --------------------------------------------------------------
+
+        self.below_webcam_scroll = QScrollArea(
+            self.below_webcam_container
+        )
+
+        self.below_webcam_scroll.setWidgetResizable(
+            True
+        )
+
+        self.below_webcam_scroll.setFrameShape(
+            QFrame.NoFrame
+        )
+
+        self.below_webcam_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarAlwaysOff
+        )
+
+        self.below_webcam_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarAsNeeded
+        )
+
+        self.below_webcam_scroll.setStyleSheet(
+            f"""
+            QScrollArea {{
+                background: transparent;
+                border: none;
+            }}
+
+            QScrollBar:vertical {{
+                background: transparent;
+                width: 10px;
+                margin: 4px 0px 4px 0px;
+            }}
+
+            QScrollBar::handle:vertical {{
+                background: {self._get_color(BORDER_COLOR)};
+                border-radius: 5px;
+                min-height: 30px;
+            }}
+
+            QScrollBar::handle:vertical:hover {{
+                background: {self._get_color(ACCENT_COLOR)};
+            }}
+
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+            """
+        )
+
+        # --------------------------------------------------------------
+        # Scroll content
+        # --------------------------------------------------------------
+
+        self.below_webcam_frame = QWidget()
+
+        self.below_webcam_frame.setStyleSheet(
+            f"""
+            QWidget {{
+                background: {self._get_color(PANEL_BG)};
+            }}
+            """
+        )
+
+        self.below_webcam_content_layout = QVBoxLayout(
+            self.below_webcam_frame
+        )
+
+        self.below_webcam_content_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
+        )
+
+        self.below_webcam_content_layout.setSpacing(5)
+
+        self.below_webcam_scroll.setWidget(
+            self.below_webcam_frame
+        )
+
+        self.below_webcam_layout.addWidget(
+            self.below_webcam_scroll
+        )
+
+    # ------------------------------------------------------------------
+    # Video source
+    # ------------------------------------------------------------------
+
+    def on_video_source_changed(
+        self,
+        index=None,
+    ):
         if self.camera is None:
             return
 
         try:
             source = int(
-                self.video_source_var.get()
+                self.video_source_dropdown.currentText()
             )
+
         except ValueError:
             return
 
@@ -122,177 +362,305 @@ class ControlsMixin:
             source
         )
 
-    def update_below_webcam_scroll_region(self, event=None):
-        self.below_webcam_canvas.configure(
-            scrollregion=self.below_webcam_canvas.bbox("all")
-        )
-
-    def resize_below_webcam_content(self, event):
-        self.below_webcam_canvas.itemconfig(
-            self.below_webcam_window,
-            width=max(event.width, self.below_webcam_frame.winfo_reqwidth()),
-        )
-
-    def on_below_webcam_mousewheel(self, event):
-        self.below_webcam_canvas.yview_scroll(
-            int(-1 * (event.delta / 120)),
-            "units",
-        )
+    # ------------------------------------------------------------------
+    # Main control frame
+    # ------------------------------------------------------------------
 
     def create_control_frame(self):
-        self.control_frame = tk.Frame(
-            self.below_webcam_frame,
-            bd=2,
-            relief=tk.GROOVE,
-            padx=8,
-            pady=6,
+        self.control_frame = QFrame(
+            self.below_webcam_frame
         )
 
-        self.control_frame.pack(
-            fill=tk.X,
-            padx=10,
-            pady=(0, 8),
+        self.control_frame.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Fixed,
         )
 
-        self.control_canvas = tk.Canvas(
+        self.control_frame.setStyleSheet(
+            f"""
+            QFrame {{
+                background: {self._get_color(CARD_BG)};
+                border: 1px solid {self._get_color(BORDER_COLOR)};
+                border-radius: 10px;
+            }}
+            """
+        )
+
+        self._add_below_webcam_widget(
             self.control_frame,
-            highlightthickness=0,
-            bd=0,
-            height=48,
+            self.BELOW_WEBCAM_ORDER["control_frame"],
         )
 
-        self.control_canvas.pack(
-            side=tk.TOP,
-            fill=tk.BOTH,
-            expand=True,
+        # --------------------------------------------------------------
+        # Scroll area
+        # --------------------------------------------------------------
+
+        self.control_scroll = QScrollArea(
+            self.control_frame
         )
 
-        self.control_xscrollbar = ttk.Scrollbar(
-            self.control_frame,
-            orient=tk.HORIZONTAL,
-            command=self.control_canvas.xview,
+        self.control_scroll.setWidgetResizable(
+            True
         )
 
-        self.control_xscrollbar.pack(
-            side=tk.BOTTOM,
-            fill=tk.X,
+        self.control_scroll.setFrameShape(
+            QFrame.NoFrame
         )
 
-        self.control_canvas.configure(
-            xscrollcommand=self.control_xscrollbar.set,
+        self.control_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarAlwaysOff
         )
 
-        self.control_content = tk.Frame(
-            self.control_canvas,
-            padx=8,
-            pady=2,
+        self.control_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarAsNeeded
         )
 
-        self.control_window = self.control_canvas.create_window(
-            (0, 0),
-            window=self.control_content,
-            anchor="nw",
+        self.control_scroll.setMinimumHeight(
+            72
         )
 
-        self.control_content.bind(
-            "<Configure>",
-            self.update_control_scroll_region,
+        self.control_scroll.setStyleSheet(
+            f"""
+            QScrollArea {{
+                background: transparent;
+                border: none;
+            }}
+
+            QScrollBar:horizontal {{
+                background: transparent;
+                height: 10px;
+                margin: 0px 8px 4px 8px;
+            }}
+
+            QScrollBar::handle:horizontal {{
+                background: {self._get_color(BORDER_COLOR)};
+                border-radius: 5px;
+                min-width: 30px;
+            }}
+
+            QScrollBar::handle:horizontal:hover {{
+                background: {self._get_color(ACCENT_COLOR)};
+            }}
+
+            QScrollBar::add-line:horizontal,
+            QScrollBar::sub-line:horizontal {{
+                width: 0px;
+            }}
+            """
         )
 
-        self.control_canvas.bind(
-            "<Configure>",
-            self.resize_control_content,
+        # --------------------------------------------------------------
+        # Control content
+        # --------------------------------------------------------------
+
+        self.control_content = QWidget()
+
+        self.control_content.setStyleSheet(
+            f"""
+            QWidget {{
+                background: {self._get_color(CARD_BG)};
+            }}
+            """
         )
 
-        self.require_red_var = tk.BooleanVar(
-            value=False
+        self.control_layout = QHBoxLayout(
+            self.control_content
         )
 
-        self.require_red_check = tk.Checkbutton(
-            self.control_content,
-            text="Require Red Scan",
-            variable=self.require_red_var,
-            command=self.on_require_red_changed,
-            font=("Arial", 11),
+        self.control_layout.setContentsMargins(
+            8,
+            8,
+            8,
+            8,
         )
 
-        self.require_red_check.pack(
-            side=tk.LEFT,
-            padx=8,
+        self.control_layout.setSpacing(8)
+
+        self.control_scroll.setWidget(
+            self.control_content
         )
 
-        tk.Label(
-            self.control_content,
-            text="Mode:",
-            font=("Arial", 11, "bold"),
-        ).pack(
-            side=tk.LEFT,
-            padx=(2, 5),
+        control_outer_layout = QVBoxLayout(
+            self.control_frame
         )
 
-        self.trigger_mode_var = tk.StringVar(
-            value=TRIGGER_MANUAL
+        control_outer_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
         )
 
-        self.trigger_mode_dropdown = ttk.Combobox(
-            self.control_content,
-            textvariable=self.trigger_mode_var,
-            values=[
+        control_outer_layout.addWidget(
+            self.control_scroll
+        )
+
+        # --------------------------------------------------------------
+        # Require Red
+        # --------------------------------------------------------------
+
+        self.require_red_var = False
+
+        self.require_red_check = XCheckBox(
+            "Require Red Scan"
+        )
+
+        self.require_red_check.setChecked(
+            False
+        )
+
+        self.require_red_check.setFont(
+            self._font(12)
+        )
+
+        self._style_checkbox(
+            self.require_red_check
+        )
+
+        self.require_red_check.toggled.connect(
+            self._require_red_toggled
+        )
+
+        self.control_layout.addWidget(
+            self.require_red_check
+        )
+
+        # --------------------------------------------------------------
+        # Trigger mode label
+        # --------------------------------------------------------------
+
+        self.trigger_label = QLabel(
+            "Mode:"
+        )
+
+        self.trigger_label.setFont(
+            self._font(
+                12,
+                QFont.Bold,
+            )
+        )
+
+        self._style_control_label(
+            self.trigger_label
+        )
+
+        self.control_layout.addWidget(
+            self.trigger_label
+        )
+
+        # --------------------------------------------------------------
+        # Trigger mode
+        # --------------------------------------------------------------
+
+        self.trigger_mode_var = TRIGGER_MANUAL
+
+        self.trigger_mode_dropdown = QComboBox()
+
+        self.trigger_mode_dropdown.addItems(
+            [
                 TRIGGER_MANUAL,
                 TRIGGER_AUTOMATIC,
                 TRIGGER_CONTINUOUS,
-            ],
-            state="readonly",
-            width=20,
+            ]
         )
 
-        self.trigger_mode_dropdown.pack(
-            side=tk.LEFT,
-            padx=5,
+        self.trigger_mode_dropdown.setCurrentText(
+            TRIGGER_MANUAL
         )
 
-        self.trigger_mode_dropdown.bind(
-            "<<ComboboxSelected>>",
-            self.on_trigger_mode_changed,
+        self.trigger_mode_dropdown.setFixedSize(
+            180,
+            36,
         )
 
-        tk.Label(
-            self.control_content,
-            text="Camera:",
-            font=("Arial", 11, "bold"),
-        ).pack(
-            side=tk.LEFT,
-            padx=(15, 5),
+        self.trigger_mode_dropdown.setFont(
+            self._font(12)
         )
+
+        self._configure_control_dropdown(
+            self.trigger_mode_dropdown
+        )
+
+        self.trigger_mode_dropdown.currentTextChanged.connect(
+            self.on_trigger_mode_changed
+        )
+
+        self.control_layout.addWidget(
+            self.trigger_mode_dropdown
+        )
+
+        # --------------------------------------------------------------
+        # Camera label
+        # --------------------------------------------------------------
+
+        self.camera_label = QLabel(
+            "Camera:"
+        )
+
+        self.camera_label.setFont(
+            self._font(
+                12,
+                QFont.Bold,
+            )
+        )
+
+        self._style_control_label(
+            self.camera_label
+        )
+
+        self.control_layout.addWidget(
+            self.camera_label
+        )
+
+        # --------------------------------------------------------------
+        # Camera
+        # --------------------------------------------------------------
 
         default_source = DEFAULT_VIDEO_SOURCE
 
-        self.video_source_var = tk.StringVar(
-            value=str(default_source)
+        self.video_source_var = str(
+            default_source
         )
 
-        self.video_source_dropdown = ttk.Combobox(
-            self.control_content,
-            textvariable=self.video_source_var,
-            values=[
+        self.video_source_dropdown = QComboBox()
+
+        self.video_source_dropdown.addItems(
+            [
                 "0",
                 "1",
                 "2",
                 "3",
-            ],
-            state="readonly",
-            width=8,
+            ]
         )
 
-        self.video_source_dropdown.pack(
-            side=tk.LEFT,
-            padx=5,
+        self.video_source_dropdown.setCurrentText(
+            str(default_source)
         )
 
-        self.video_source_dropdown.bind(
-            "<<ComboboxSelected>>",
-            self.on_video_source_changed,
+        self.video_source_dropdown.setFixedSize(
+            80,
+            36,
         )
+
+        self.video_source_dropdown.setFont(
+            self._font(12)
+        )
+
+        self._configure_control_dropdown(
+            self.video_source_dropdown
+        )
+
+        self.video_source_dropdown.currentTextChanged.connect(
+            self.on_video_source_changed
+        )
+
+        self.control_layout.addWidget(
+            self.video_source_dropdown
+        )
+
+        # --------------------------------------------------------------
+        # Manual capture key
+        # --------------------------------------------------------------
 
         self.manual_capture_key = "space"
 
@@ -318,54 +686,102 @@ class ControlsMixin:
             ):
                 pass
 
-        self.manual_trigger_button = tk.Button(
-            self.control_content,
-            text=f"Capture [{self.manual_capture_key}]",
-            command=self.manual_trigger,
-            font=("Arial", 11, "bold"),
-            width=18,
+        # --------------------------------------------------------------
+        # Manual trigger button
+        # --------------------------------------------------------------
+
+        self.manual_trigger_button = QPushButton(
+            f"Capture [{self.manual_capture_key}]"
         )
 
-        self.manual_trigger_button.pack(
-            side=tk.LEFT,
-            padx=8,
+        self.manual_trigger_button.setFixedSize(
+            160,
+            36,
         )
 
-        tk.Label(
-            self.control_content,
-            text="Crop:",
-            font=("Arial", 11, "bold"),
-        ).pack(
-            side=tk.LEFT,
-            padx=(15, 5),
+        self.manual_trigger_button.setFont(
+            self._font(
+                12,
+                QFont.Bold,
+            )
         )
 
-        self.crop_mode_var = tk.StringVar(
-            value=CROP_MODE_FULL
+        self._style_accent_button(
+            self.manual_trigger_button
         )
 
-        self.crop_mode_dropdown = ttk.Combobox(
-            self.control_content,
-            textvariable=self.crop_mode_var,
-            values=[
+        self.manual_trigger_button.clicked.connect(
+            self.manual_trigger
+        )
+
+        self.control_layout.addWidget(
+            self.manual_trigger_button
+        )
+
+        # --------------------------------------------------------------
+        # Crop label
+        # --------------------------------------------------------------
+
+        self.crop_label = QLabel(
+            "Crop:"
+        )
+
+        self.crop_label.setFont(
+            self._font(
+                12,
+                QFont.Bold,
+            )
+        )
+
+        self._style_control_label(
+            self.crop_label
+        )
+
+        self.control_layout.addWidget(
+            self.crop_label
+        )
+
+        # --------------------------------------------------------------
+        # Crop mode
+        # --------------------------------------------------------------
+
+        self.crop_mode_var = CROP_MODE_FULL
+
+        self.crop_mode_dropdown = QComboBox()
+
+        self.crop_mode_dropdown.addItems(
+            [
                 CROP_MODE_FULL,
                 CROP_MODE_PREVIEW,
-                # CROP_MODE_OBJECTS,
-                # CROP_MODE_EXPANDED,
-            ],
-            state="readonly",
-            width=30,
+            ]
         )
 
-        self.crop_mode_dropdown.pack(
-            side=tk.LEFT,
-            padx=5,
+        self.crop_mode_dropdown.setCurrentText(
+            CROP_MODE_FULL
         )
 
-        self.crop_mode_dropdown.bind(
-            "<<ComboboxSelected>>",
-            self.on_crop_mode_changed,
+        self.crop_mode_dropdown.setFixedSize(
+            240,
+            36,
         )
+
+        self.crop_mode_dropdown.setFont(
+            self._font(12)
+        )
+
+        self._configure_control_dropdown(
+            self.crop_mode_dropdown
+        )
+
+        self.crop_mode_dropdown.currentTextChanged.connect(
+            self.on_crop_mode_changed
+        )
+
+        self.control_layout.addWidget(
+            self.crop_mode_dropdown
+        )
+
+        self.control_layout.addStretch()
 
         self.update_manual_button_state()
 
@@ -373,79 +789,510 @@ class ControlsMixin:
             self.manual_capture_key
         )
 
-    def update_control_scroll_region(self, event=None):
-        self.control_canvas.configure(
-            scrollregion=self.control_canvas.bbox("all")
-        )
+    # ------------------------------------------------------------------
+    # Label styling
+    # ------------------------------------------------------------------
 
-    def resize_control_content(self, event):
-        self.control_canvas.itemconfigure(
-            self.control_window,
-            width=max(event.width, self.control_content.winfo_reqwidth()),
-        )
-
-    def update_manual_capture_key(self, key):
-        if hasattr(self, "manual_capture_key"):
-            self.root.unbind(
-                f"<{self.manual_capture_key}>"
-            )
-
-        self.manual_capture_key = key
-
-        self.root.bind(
-            f"<{self.manual_capture_key}>",
-            self.on_manual_key,
-        )
-
-        if hasattr(self, "manual_trigger_button"):
-            self.manual_trigger_button.config(
-                text=f"Capture [{self.manual_capture_key}]"
-            )
-
-    def on_inventory_type_changed(
+    def _style_control_label(
         self,
-        event=None,
+        label,
+        size=None,
+        list=False,
     ):
-        if self.camera is None:
-            return
-
-        self.camera.set_inventory_type(
-            self.inventory_type_var.get()
+        label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {self._get_color(TEXT_COLOR)};
+                background: transparent;
+                {"font-size: " + str(size) + "px;" if size else ""}
+            }}
+            """
         )
+
+    # ------------------------------------------------------------------
+    # Dropdown configuration
+    # ------------------------------------------------------------------
+
+    def _configure_control_dropdown(
+        self,
+        dropdown,
+    ):
+        dropdown.setStyleSheet(
+            f"""
+            QComboBox {{
+                color: {self._get_color(TEXT_COLOR)};
+                background: {self._get_color(INPUT_BG)};
+                border: 1px solid {self._get_color(BORDER_COLOR)};
+                border-radius: 8px;
+                padding: 4px 10px;
+            }}
+
+            QComboBox:hover {{
+                border: 1px solid {self._get_color(ACCENT_COLOR)};
+            }}
+
+            QComboBox:focus {{
+                border: 1px solid {self._get_color(ACCENT_COLOR)};
+            }}
+
+            QComboBox::drop-down {{
+                border: none;
+                width: 28px;
+            }}
+
+            QComboBox QAbstractItemView {{
+                color: {self._get_color(TEXT_COLOR)};
+                background: {self._get_color(PANEL_BG)};
+                border: 1px solid {self._get_color(BORDER_COLOR)};
+                selection-background-color: {self._get_color(ACCENT_COLOR)};
+                selection-color: {self._get_color(TEXT_COLOR)};
+                padding: 4px;
+            }}
+            """
+        )
+
+    # ------------------------------------------------------------------
+    # Button styling
+    # ------------------------------------------------------------------
+
+    def _style_accent_button(
+        self,
+        button,
+    ):
+        button.setStyleSheet(
+            f"""
+            QPushButton {{
+                color: {self._get_color(INVERTED_TEXT)};
+                background: {self._get_color(ACCENT_COLOR)};
+                border: none;
+                border-radius: 8px;
+                padding: 6px 12px;
+            }}
+
+            QPushButton:hover {{
+                background: {self._get_color(ACCENT_HOVER)};
+            }}
+
+            QPushButton:pressed {{
+                background: {self._get_color(ACCENT_HOVER)};
+            }}
+
+            QPushButton:disabled {{
+                background: {self._get_color(BORDER_COLOR)};
+                color: {self._get_color(MUTED_TEXT)};
+            }}
+            """
+        )
+
+    # ------------------------------------------------------------------
+    # Theme refresh
+    # ------------------------------------------------------------------
+
+    def refresh_control_theme(self):
+        """
+        Reapply the current theme without recreating widgets.
+        """
+
+        # --------------------------------------------------------------
+        # Below webcam container
+        # --------------------------------------------------------------
+
+        if hasattr(
+            self,
+            "below_webcam_container",
+        ):
+            self.below_webcam_container.setStyleSheet(
+                f"""
+                QFrame {{
+                    background: {self._get_color(CONTROL_BG)};
+                    border-radius: 12px;
+                }}
+                """
+            )
+
+        # --------------------------------------------------------------
+        # Below webcam content
+        # --------------------------------------------------------------
+
+        if hasattr(
+            self,
+            "below_webcam_frame",
+        ):
+            self.below_webcam_frame.setStyleSheet(
+                f"""
+                QWidget {{
+                    background: {self._get_color(PANEL_BG)};
+                }}
+                """
+            )
+
+        # --------------------------------------------------------------
+        # Control labels
+        # --------------------------------------------------------------
+
+        for name in (
+            "trigger_label",
+            "camera_label",
+            "crop_label",
+        ):
+            if hasattr(
+                self,
+                name,
+            ):
+                self._style_control_label(
+                    getattr(self, name)
+                )
+
+        # --------------------------------------------------------------
+        # Main control frame
+        # --------------------------------------------------------------
+
+        if hasattr(
+            self,
+            "control_frame",
+        ):
+            self.control_frame.setStyleSheet(
+                f"""
+                QFrame {{
+                    background: {self._get_color(CARD_BG)};
+                    border: 1px solid {self._get_color(BORDER_COLOR)};
+                    border-radius: 10px;
+                }}
+                """
+            )
+
+        # --------------------------------------------------------------
+        # Control content
+        # --------------------------------------------------------------
+
+        if hasattr(
+            self,
+            "control_content",
+        ):
+            self.control_content.setStyleSheet(
+                f"""
+                QWidget {{
+                    background: {self._get_color(CARD_BG)};
+                }}
+                """
+            )
+
+        # --------------------------------------------------------------
+        # Below webcam scroll
+        # --------------------------------------------------------------
+
+        if hasattr(
+            self,
+            "below_webcam_scroll",
+        ):
+            self.below_webcam_scroll.setStyleSheet(
+                f"""
+                QScrollArea {{
+                    background: transparent;
+                    border: none;
+                }}
+
+                QScrollBar:vertical {{
+                    background: transparent;
+                    width: 10px;
+                    margin: 4px 0px 4px 0px;
+                }}
+
+                QScrollBar::handle:vertical {{
+                    background: {self._get_color(BORDER_COLOR)};
+                    border-radius: 5px;
+                    min-height: 30px;
+                }}
+
+                QScrollBar::handle:vertical:hover {{
+                    background: {self._get_color(ACCENT_COLOR)};
+                }}
+
+                QScrollBar::add-line:vertical,
+                QScrollBar::sub-line:vertical {{
+                    height: 0px;
+                }}
+                """
+            )
+
+        # --------------------------------------------------------------
+        # Control scroll
+        # --------------------------------------------------------------
+
+        if hasattr(
+            self,
+            "control_scroll",
+        ):
+            self.control_scroll.setStyleSheet(
+                f"""
+                QScrollArea {{
+                    background: transparent;
+                    border: none;
+                }}
+
+                QScrollBar:horizontal {{
+                    background: transparent;
+                    height: 10px;
+                    margin: 0px 8px 4px 8px;
+                }}
+
+                QScrollBar::handle:horizontal {{
+                    background: {self._get_color(BORDER_COLOR)};
+                    border-radius: 5px;
+                    min-width: 30px;
+                }}
+
+                QScrollBar::handle:horizontal:hover {{
+                    background: {self._get_color(ACCENT_COLOR)};
+                }}
+
+                QScrollBar::add-line:horizontal,
+                QScrollBar::sub-line:horizontal {{
+                    width: 0px;
+                }}
+                """
+            )
+
+        # --------------------------------------------------------------
+        # Action buttons frame
+        # --------------------------------------------------------------
+
+        if hasattr(
+            self,
+            "action_buttons_frame",
+        ):
+            self.action_buttons_frame.setStyleSheet(
+                f"""
+                QFrame {{
+                    background: {self._get_color(PANEL_BG)};
+                }}
+                """
+            )
+
+        # --------------------------------------------------------------
+        # Checkboxes
+        # --------------------------------------------------------------
+
+        for name in (
+            "require_red_check",
+            "crop_box_check",
+            "counting_box_check",
+        ):
+            if hasattr(
+                self,
+                name,
+            ):
+                self._style_checkbox(
+                    getattr(self, name)
+                )
+
+        # --------------------------------------------------------------
+        # Dropdowns
+        # --------------------------------------------------------------
+
+        for name in (
+            "trigger_mode_dropdown",
+            "video_source_dropdown",
+            "crop_mode_dropdown",
+        ):
+            if hasattr(
+                self,
+                name,
+            ):
+                self._configure_control_dropdown(
+                    getattr(self, name)
+                )
+
+        # --------------------------------------------------------------
+        # Accent button
+        # --------------------------------------------------------------
+
+        if hasattr(
+            self,
+            "manual_trigger_button",
+        ):
+            self._style_accent_button(
+                self.manual_trigger_button
+            )
+
+        # --------------------------------------------------------------
+        # Settings button
+        # --------------------------------------------------------------
+
+        if hasattr(
+            self,
+            "settings_button",
+        ):
+            self._style_settings_button(
+                self.settings_button
+            )
+
+        # --------------------------------------------------------------
+        # Stop button
+        # --------------------------------------------------------------
+
+        if hasattr(
+            self,
+            "stop_button",
+        ):
+            self._style_stop_button(
+                self.stop_button
+            )
+
+        # --------------------------------------------------------------
+        # Status label
+        # --------------------------------------------------------------
+
+        if hasattr(
+            self,
+            "status_label",
+        ):
+            self.status_label.setStyleSheet(
+                f"""
+                QLabel {{
+                    color: {self._get_color(MUTED_TEXT)};
+                    background: transparent;
+                }}
+                """
+            )
+
+        # --------------------------------------------------------------
+        # Count label
+        # --------------------------------------------------------------
+
+        if hasattr(
+            self,
+            "count_label",
+        ):
+            self.count_label.setStyleSheet(
+                f"""
+                QLabel {{
+                    color: {self._get_color(TEXT_COLOR)};
+                    background: transparent;
+                }}
+                """
+            )
+
+    # ------------------------------------------------------------------
+    # Require red
+    # ------------------------------------------------------------------
+
+    def _require_red_toggled(
+        self,
+        checked,
+    ):
+        self.require_red_var = checked
+        self.on_require_red_changed()
 
     def on_require_red_changed(self):
         if self.camera is None:
             return
 
         self.camera.set_require_red_for_automatic(
-            self.require_red_var.get()
+            self.require_red_var
         )
 
-    def on_trigger_mode_changed(self, event=None):
+    # ------------------------------------------------------------------
+    # Trigger mode
+    # ------------------------------------------------------------------
+
+    def on_trigger_mode_changed(
+        self,
+        mode,
+    ):
+        self.trigger_mode_var = mode
+
         if self.camera is None:
             return
 
-        mode = self.trigger_mode_var.get()
-
-        self.camera.set_trigger_mode(mode)
+        self.camera.set_trigger_mode(
+            mode
+        )
 
         self.update_manual_button_state()
 
     def update_manual_button_state(self):
-        self.manual_trigger_button.config(
-            state=tk.NORMAL
+        if not hasattr(
+            self,
+            "manual_trigger_button",
+        ):
+            return
+
+        self.manual_trigger_button.setEnabled(
+            True
         )
 
-    def on_crop_mode_changed(self, event=None):
+    # ------------------------------------------------------------------
+    # Crop mode
+    # ------------------------------------------------------------------
+
+    def on_crop_mode_changed(
+        self,
+        mode,
+    ):
+        self.crop_mode_var = mode
+
         if self.camera is None:
             return
 
         self.camera.set_crop_mode(
-            self.crop_mode_var.get()
+            mode
         )
+
+    # ------------------------------------------------------------------
+    # Metadata
+    # ------------------------------------------------------------------
 
     def commit_metadata_entries(self):
         self.update_camera_metadata()
+
+    # ------------------------------------------------------------------
+    # Manual capture key
+    # ------------------------------------------------------------------
+
+    def update_manual_capture_key(
+        self,
+        key,
+    ):
+        self.manual_capture_key = key
+
+        if hasattr(
+            self,
+            "_manual_shortcut",
+        ):
+            self._manual_shortcut.setEnabled(
+                False
+            )
+
+            self._manual_shortcut.deleteLater()
+
+            self._manual_shortcut = None
+
+        if hasattr(
+            self,
+            "manual_trigger_button",
+        ):
+            self.manual_trigger_button.setText(
+                f"Capture [{self.manual_capture_key}]"
+            )
+
+        qt_key = key
+
+        if key.lower() == "space":
+            qt_key = "Space"
+
+        self._manual_shortcut = QShortcut(
+            QKeySequence(qt_key),
+            self.root,
+        )
+
+        self._manual_shortcut.activated.connect(
+            self.on_manual_key
+        )
+
+    # ------------------------------------------------------------------
+    # Manual capture
+    # ------------------------------------------------------------------
 
     def manual_trigger(self):
         if self.camera is None:
@@ -453,74 +1300,187 @@ class ControlsMixin:
 
         self.camera.request_manual_capture()
 
-    def on_manual_key(self, event=None):
-        if self.trigger_mode_var.get() == TRIGGER_MANUAL:
+    def on_manual_key(self):
+        if self.trigger_mode_var == TRIGGER_MANUAL:
             self.manual_trigger()
 
+    # ------------------------------------------------------------------
+    # Status
+    # ------------------------------------------------------------------
+
     def create_status_display(self):
-        self.status_label = tk.Label(
-            self.below_webcam_frame,
-            text="Waiting for objects...",
-            font=("Arial", 14),
-            anchor="w",
+        self.status_label = QLabel(
+            "Waiting for objects..."
         )
 
-        self.status_label.pack(
-            fill=tk.X,
-            pady=5,
+        self.status_label.setFont(
+            self._font(14)
         )
+
+        self.status_label.setAlignment(
+            Qt.AlignLeft | Qt.AlignVCenter
+        )
+
+        self.status_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {self._get_color(MUTED_TEXT)};
+                background: transparent;
+            }}
+            """
+        )
+
+        self._add_below_webcam_widget(
+            self.status_label,
+            self.BELOW_WEBCAM_ORDER["status_label"],
+        )
+
+    # ------------------------------------------------------------------
+    # Count
+    # ------------------------------------------------------------------
 
     def create_count_display(self):
-        self.count_label = tk.Label(
-            self.below_webcam_frame,
-            text="Crops: 0",
-            font=("Arial", 14),
-            anchor="w",
+        self.count_label = QLabel(
+            "Crops: 0"
         )
 
-        self.count_label.pack(
-            fill=tk.X,
-            pady=5,
+        self.count_label.setFont(
+            self._font(
+                14,
+                QFont.Bold,
+            )
         )
 
-    def create_box_display_controls(self, parent):
-        self.crop_box_var = tk.BooleanVar(
-            value=False
+        self.count_label.setAlignment(
+            Qt.AlignLeft | Qt.AlignVCenter
         )
 
-        self.crop_box_check = tk.Checkbutton(
+        self.count_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {self._get_color(TEXT_COLOR)};
+                background: transparent;
+            }}
+            """
+        )
+
+        self._add_below_webcam_widget(
+            self.count_label,
+            self.BELOW_WEBCAM_ORDER["count_label"],
+        )
+    # ------------------------------------------------------------------
+    # Box display controls
+    # ------------------------------------------------------------------
+
+    def create_box_display_controls(
+        self,
+        parent,
+    ):
+        self.crop_box_var = False
+
+        self.crop_box_check = XCheckBox(
+            "Preview Crop",
             parent,
-            text="Preview Crop",
-            variable=self.crop_box_var,
-            command=self.update_box_display,
-            font=("Arial", 11),
         )
 
-        self.crop_box_check.pack(
-            side=tk.LEFT,
-            padx=5,
+        self.crop_box_check.setChecked(
+            False
         )
 
-        self.counting_box_var = tk.BooleanVar(
-            value=False
+        self.crop_box_check.setFont(
+            self._font(12)
         )
 
-        self.counting_box_check = tk.Checkbutton(
+        self._style_checkbox(
+            self.crop_box_check
+        )
+
+        self.crop_box_check.toggled.connect(
+            self.update_box_display
+        )
+
+        parent.layout().addWidget(
+            self.crop_box_check
+        )
+
+        self.counting_box_var = False
+
+        self.counting_box_check = XCheckBox(
+            "Counting Box",
             parent,
-            text="Counting Box",
-            variable=self.counting_box_var,
-            command=self.update_box_display,
-            font=("Arial", 11),
         )
 
-        self.counting_box_check.pack(
-            side=tk.LEFT,
-            padx=5,
+        self.counting_box_check.setChecked(
+            False
+        )
+
+        self.counting_box_check.setFont(
+            self._font(12)
+        )
+
+        self._style_checkbox(
+            self.counting_box_check
+        )
+
+        self.counting_box_check.toggled.connect(
+            self.update_box_display
+        )
+
+        parent.layout().addWidget(
+            self.counting_box_check
+        )
+
+    # ------------------------------------------------------------------
+    # Checkbox styling
+    # ------------------------------------------------------------------
+
+    def _style_checkbox(
+        self,
+        checkbox,
+    ):
+        checkbox.setStyleSheet(
+            f"""
+            QCheckBox {{
+                color: {self._get_color(TEXT_COLOR)};
+                spacing: 6px;
+            }}
+
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border-radius: 4px;
+                border: 1px solid {self._get_color(BORDER_COLOR)};
+                background: {self._get_color(INPUT_BG)};
+            }}
+
+            QCheckBox::indicator:hover {{
+                border: 1px solid {self._get_color(ACCENT_COLOR)};
+            }}
+
+            QCheckBox::indicator:checked {{
+                background: {self._get_color(ACCENT_COLOR)};
+                border: 1px solid {self._get_color(ACCENT_COLOR)};
+                image: url(:/qt-project.org/styles/commonstyle/images/checkbox_checked.png);
+            }}
+            """
         )
 
     def update_box_display(self):
-        self.show_crop_box = self.crop_box_var.get()
-        self.show_counting_box = self.counting_box_var.get()
+        self.show_crop_box = (
+            self.crop_box_check.isChecked()
+        )
+
+        self.show_counting_box = (
+            self.counting_box_check.isChecked()
+        )
+
+        self.crop_box_var = (
+            self.show_crop_box
+        )
+
+        self.counting_box_var = (
+            self.show_counting_box
+        )
 
         if self.camera is not None:
             self.camera.set_box_display(
@@ -528,59 +1488,178 @@ class ControlsMixin:
                 self.show_counting_box,
             )
 
+    # ------------------------------------------------------------------
+    # Action buttons
+    # ------------------------------------------------------------------
+
     def create_action_buttons(self):
-        frame = tk.Frame(
+        self.action_buttons_frame = QFrame(
             self.below_webcam_frame
         )
 
-        frame.pack(
-            fill=tk.X,
-            pady=(5, 0),
+        self.action_buttons_frame.setStyleSheet(
+            f"""
+            QFrame {{
+                background: {self._get_color(PANEL_BG)};
+            }}
+            """
         )
 
-        self.create_box_display_controls(frame)
-        # self.create_analyze_button(frame)
-        # self.create_logger_button(frame)
-        self.create_stop_button(frame)
+        layout = QHBoxLayout(
+            self.action_buttons_frame
+        )
 
-    # def create_analyze_button(self, parent):
-    #     self.analyze_button = tk.Button(
-    #         parent,
-    #         text="Analyze Images",
-    #         command=self.start_analyzer,
-    #         font=("Arial", 12),
-    #         width=18,
-    #     )
+        layout.setContentsMargins(
+            10,
+            5,
+            10,
+            5,
+        )
 
-    #     self.analyze_button.pack(
-    #         side=tk.LEFT,
-    #         padx=5,
-    #     )
+        layout.setSpacing(5)
 
-    # def create_logger_button(self, parent):
-    #     self.logger_button = tk.Button(
-    #         parent,
-    #         text="Run Logger",
-    #         command=self.run_logger,
-    #         font=("Arial", 12),
-    #         width=18,
-    #     )
+        self.create_box_display_controls(
+            self.action_buttons_frame
+        )
 
-    #     self.logger_button.pack(
-    #         side=tk.LEFT,
-    #         padx=5,
-    #     )
+        self.create_settings_button(
+            self.action_buttons_frame
+        )
 
-    def create_stop_button(self, parent):
-        self.stop_button = tk.Button(
+        self.create_stop_button(
+            self.action_buttons_frame
+        )
+
+        self._add_below_webcam_widget(
+            self.action_buttons_frame,
+            self.BELOW_WEBCAM_ORDER["action_buttons_frame"],
+        )
+
+    # ------------------------------------------------------------------
+    # Settings button
+    # ------------------------------------------------------------------
+
+    def create_settings_button(
+        self,
+        parent,
+    ):
+        self.settings_button = QPushButton(
+            "Settings",
             parent,
-            text="Stop",
-            command=self.stop,
-            font=("Arial", 12),
-            width=12,
         )
 
-        self.stop_button.pack(
-            side=tk.RIGHT,
-            padx=5,
+        self.settings_button.setFixedSize(
+            110,
+            38,
+        )
+
+        self.settings_button.setFont(
+            self._font(
+                12,
+                QFont.Bold,
+            )
+        )
+
+        self._style_settings_button(
+            self.settings_button
+        )
+
+        self.settings_button.clicked.connect(
+            self.open_settings
+        )
+
+        parent.layout().addWidget(
+            self.settings_button
+        )
+
+    def _style_settings_button(
+        self,
+        button,
+    ):
+        button.setStyleSheet(
+            f"""
+            QPushButton {{
+                color: {self._get_color(INVERTED_TEXT)};
+                background: {self._get_color(ACCENT_COLOR)};
+                border: none;
+                border-radius: 8px;
+                padding: 6px 12px;
+            }}
+
+            QPushButton:hover {{
+                background: {self._get_color(ACCENT_HOVER)};
+            }}
+
+            QPushButton:pressed {{
+                background: {self._get_color(ACCENT_HOVER)};
+            }}
+
+            QPushButton:disabled {{
+                background: {self._get_color(BORDER_COLOR)};
+                color: {self._get_color(MUTED_TEXT)};
+            }}
+            """
+        )
+
+    # ------------------------------------------------------------------
+    # Stop button
+    # ------------------------------------------------------------------
+
+    def create_stop_button(
+        self,
+        parent,
+    ):
+        self.stop_button = QPushButton(
+            "Stop",
+            parent,
+        )
+
+        self.stop_button.setFixedSize(
+            110,
+            36,
+        )
+
+        self.stop_button.setFont(
+            self._font(
+                12,
+                QFont.Bold,
+            )
+        )
+
+        self._style_stop_button(
+            self.stop_button
+        )
+
+        self.stop_button.clicked.connect(
+            self.stop
+        )
+
+        parent.layout().addStretch()
+
+        parent.layout().addWidget(
+            self.stop_button
+        )
+
+    def _style_stop_button(
+        self,
+        button,
+    ):
+        button.setStyleSheet(
+            f"""
+            QPushButton {{
+                color: {self._get_color(WHITE_TEXT)};
+                background: {self._get_color(DANGER_COLOR)};
+                border: none;
+                border-radius: 8px;
+                padding: 6px 12px;
+            }}
+
+            QPushButton:hover {{
+                background: {self._get_color(DANGER_HOVER)};
+            }}
+
+            QPushButton:pressed {{
+                background: {self._get_color(DANGER_HOVER)};
+            }}
+            """
         )

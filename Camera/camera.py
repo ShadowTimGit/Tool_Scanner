@@ -1,14 +1,14 @@
 import cv2
 import json
 import os
+import threading
 import time
 
-from performance_debug import time_block
 from tool_logger.logger_worker import submit_json
 
 from datetime import datetime
 
-from config import (
+from settings_menu.config import (
     DEFAULT_VIDEO_SOURCE,
     OUTPUT_DIR,
     SETTINGS_FILE,
@@ -35,6 +35,7 @@ from GUI.gui_constants import (
     INVENTORY_SALE,
 )
 
+
 def get_output_dir():
     try:
         with open(
@@ -57,6 +58,7 @@ def get_output_dir():
     ):
         return OUTPUT_DIR
 
+
 # ==================================================
 # Camera / Capture Settings
 # ==================================================
@@ -76,8 +78,6 @@ REQUIRE_RED_FOR_AUTOMATIC = True
 
 WINDOW_NAME = "Camera"
 
-
-# Add near the top-level constants/imports
 
 INVENTORY_SETTINGS_PATH = os.path.join(
     os.path.dirname(__file__),
@@ -102,8 +102,9 @@ def load_estimated_values():
 
     return data.get(
         "estimated_values",
-        {}
+        {},
     )
+
 
 class CameraProcessor:
 
@@ -123,11 +124,12 @@ class CameraProcessor:
         # -------------------------
         # Settings
         # -------------------------
+
+        self.recent_crops_callback = None
+
         self.metadata_sync_callback = None
 
-        self.settings = (
-            CameraSettings()
-        )
+        self.settings = CameraSettings()
 
         self.camera_width = (
             self.settings.camera_width
@@ -148,11 +150,12 @@ class CameraProcessor:
         )
 
         if not self.cap.isOpened():
-
             raise RuntimeError(
                 f"Could not open video source: "
                 f"{DEFAULT_VIDEO_SOURCE}"
             )
+
+        self.camera_lock = threading.Lock()
 
         self.apply_camera_resolution()
 
@@ -160,19 +163,15 @@ class CameraProcessor:
         # Box manager
         # -------------------------
 
-        self.box_manager = (
-            BoxManager(
-                self.settings
-            )
+        self.box_manager = BoxManager(
+            self.settings
         )
 
         # -------------------------
         # Object tracker
         # -------------------------
 
-        self.tracker = (
-            ObjectTracker()
-        )
+        self.tracker = ObjectTracker()
 
         # -------------------------
         # Capture
@@ -182,35 +181,31 @@ class CameraProcessor:
         self.last_capture_time = 0
         self.last_detection_time = 0.0
         self.recent_session_crops = []
+
         self.detection_interval = max(
             0.05,
             float(
                 os.getenv(
                     "TOOL_SCANNER_DETECTION_INTERVAL",
-                    "0.25",
+                    "0.15",
                 )
             ),
         )
 
         self.trigger_mode = TRIGGER_AUTOMATIC
         self.crop_mode = CROP_MODE_PREVIEW
+
         self.require_red_for_automatic = (
             REQUIRE_RED_FOR_AUTOMATIC
         )
 
-        # Objects that have already crossed
-        # the counting box during the current
-        # automatic/continuous run.
         self.processed_object_ids = set()
-
-        # Objects currently inside the counting box.
         self.counting_object_ids = set()
 
-        # Total continuous count.
         self.continuous_count = 0
 
         self.inventory_type = INVENTORY_PURCHASE
-        # Manual trigger flag.
+
         self.manual_trigger_requested = False
 
         # -------------------------
@@ -233,8 +228,6 @@ class CameraProcessor:
         self.invoice_price = None
         self.profit = None
 
-        # In __init__, after the tool-selection attributes
-
         self.estimated_values = (
             load_estimated_values()
         )
@@ -246,6 +239,181 @@ class CameraProcessor:
         self.show_crop_box = True
         self.show_counting_box = True
 
+        # ==================================================
+        # Background Processing
+        # ==================================================
+
+        self.processing_thread = None
+
+        self.processing_running = True
+
+        self.processing_condition = (
+            threading.Condition()
+        )
+
+        self.pending_frame = None
+
+        self.latest_processed_frame = None
+        self.latest_detection_count = 0
+
+        self.processing_thread = threading.Thread(
+            target=self._processing_loop,
+            name="CameraProcessing",
+            daemon=True,
+        )
+
+        self.processing_thread.start()
+
+    def set_recent_crops_callback(
+        self,
+        callback,
+    ):
+        self.recent_crops_callback = callback
+
+    # ==================================================
+    # Background Processing
+    # ==================================================
+
+    def _processing_loop(self):
+
+        while self.processing_running:
+
+            with self.processing_condition:
+
+                while (
+                    self.processing_running
+                    and self.pending_frame is None
+                ):
+                    self.processing_condition.wait(
+                        timeout=0.1
+                    )
+
+                if not self.processing_running:
+                    return
+
+                frame = self.pending_frame
+                self.pending_frame = None
+
+            if frame is None:
+                continue
+
+            try:
+
+                processed_frame, detection_count = (
+                    self._process_frame_sync(frame)
+                )
+
+                with self.processing_condition:
+
+                    self.latest_processed_frame = (
+                        processed_frame
+                    )
+
+                    self.latest_detection_count = (
+                        detection_count
+                    )
+
+            except Exception as error:
+
+                print(
+                    "CAMERA PROCESSING ERROR:"
+                )
+
+                print(error)
+
+    def process_frame(self, frame):
+        """
+        Queue a frame for background processing.
+
+        This method intentionally returns immediately so
+        the Tkinter UI thread is not blocked by detection,
+        tracking, image processing, or file operations.
+        """
+
+        if frame is None:
+            return None, 0
+
+        # Only keep the newest pending frame.
+        #
+        # If processing is slower than the camera,
+        # there is no reason to process every old frame.
+        with self.processing_condition:
+
+            self.pending_frame = frame.copy()
+
+            self.processing_condition.notify()
+
+            if self.latest_processed_frame is not None:
+
+                return (
+                    self.latest_processed_frame,
+                    self.latest_detection_count,
+                )
+
+        # Processing has not produced a frame yet.
+        return frame, 0
+
+    def _process_frame_sync(self, frame):
+        """
+        Actual frame processing.
+
+        This method runs exclusively on the
+        CameraProcessing background thread.
+        """
+
+        self.box_manager.initialize(frame)
+
+        original_frame = frame.copy()
+
+        detections = self._detect_objects(
+            frame
+        )
+
+        objects = self._update_tracked_objects(
+            detections
+        )
+
+        current_time = (
+            self._get_current_capture_time()
+        )
+
+        red_detected = self._check_red_scan(
+            original_frame
+        )
+
+        objects_inside = (
+            self._process_tracked_objects(
+                frame=frame,
+                original_frame=original_frame,
+                objects=objects,
+                red_detected=red_detected,
+                current_time=current_time,
+            )
+        )
+
+        self._handle_manual_capture(
+            original_frame=original_frame,
+            objects=objects,
+        )
+
+        self._update_counting_state(
+            objects_inside
+        )
+
+        # When YOLO is skipped, detections is None.
+        # Use the currently tracked objects for the display count.
+        detection_count = (
+            len(detections)
+            if detections is not None
+            else len(objects)
+        )
+
+        self._draw_frame_overlay(
+            frame=frame,
+            detection_count=detection_count,
+        )
+
+        return frame, detection_count
 
     # ==================================================
     # Box Properties
@@ -255,30 +423,29 @@ class CameraProcessor:
     def scan_box(self):
         return self.box_manager.scan_box
 
-
     @scan_box.setter
     def scan_box(self, value):
         self.box_manager.scan_box = value
-
 
     @property
     def crop_box(self):
         return self.box_manager.crop_box
 
-
     @crop_box.setter
     def crop_box(self, value):
         self.box_manager.crop_box = value
-
 
     @property
     def counting_box(self):
         return self.box_manager.counting_box
 
-
     @counting_box.setter
     def counting_box(self, value):
         self.box_manager.counting_box = value
+
+    # ==================================================
+    # Video Sources
+    # ==================================================
 
     def get_available_video_sources(
         max_sources=10,
@@ -286,9 +453,11 @@ class CameraProcessor:
         available = []
 
         for index in range(max_sources):
+
             cap = cv2.VideoCapture(index)
 
             if cap.isOpened():
+
                 success, frame = cap.read()
 
                 if success and frame is not None:
@@ -299,9 +468,14 @@ class CameraProcessor:
         return available
 
     def set_video_source(self, source):
+
         try:
             source = int(source)
-        except (TypeError, ValueError):
+
+        except (
+            TypeError,
+            ValueError,
+        ):
             return False
 
         if source == self.video_source:
@@ -309,48 +483,60 @@ class CameraProcessor:
 
         old_source = self.video_source
 
-        if self.cap.isOpened():
-            self.cap.release()
-
-        self.cap = cv2.VideoCapture(source)
-
-        if not self.cap.isOpened():
-            print(
-                f"Could not open video source: {source}"
-            )
-
-            self.cap = cv2.VideoCapture(
-                old_source
-            )
+        with self.camera_lock:
 
             if self.cap.isOpened():
-                self.apply_camera_resolution()
-
-            return False
-
-        self.video_source = source
-
-        self.apply_camera_resolution()
-
-        success, frame = self.cap.read()
-
-        if not success or frame is None:
-            print(
-                f"Could not read from video source: {source}"
-            )
-
-            self.cap.release()
-
-            self.video_source = old_source
+                self.cap.release()
 
             self.cap = cv2.VideoCapture(
-                old_source
+                source
             )
 
-            if self.cap.isOpened():
-                self.apply_camera_resolution()
+            if not self.cap.isOpened():
 
-            return False
+                print(
+                    f"Could not open video source: {source}"
+                )
+
+                self.cap = cv2.VideoCapture(
+                    old_source
+                )
+
+                if self.cap.isOpened():
+                    self.apply_camera_resolution()
+
+                return False
+
+            self.video_source = source
+
+            self.apply_camera_resolution()
+
+            success, frame = (
+                self.cap.read()
+            )
+
+            if (
+                not success
+                or frame is None
+            ):
+
+                print(
+                    f"Could not read from video source: "
+                    f"{source}"
+                )
+
+                self.cap.release()
+
+                self.video_source = old_source
+
+                self.cap = cv2.VideoCapture(
+                    old_source
+                )
+
+                if self.cap.isOpened():
+                    self.apply_camera_resolution()
+
+                return False
 
         self.tracker.reset()
 
@@ -359,13 +545,17 @@ class CameraProcessor:
 
         return True
 
-    def set_metadata_sync_callback(self, callback):
+    def set_metadata_sync_callback(
+        self,
+        callback,
+    ):
         self.metadata_sync_callback = callback
 
     def set_inventory_type(
         self,
         inventory_type,
     ):
+
         if inventory_type not in (
             INVENTORY_PURCHASE,
             INVENTORY_SALE,
@@ -374,12 +564,15 @@ class CameraProcessor:
 
         self.inventory_type = inventory_type
 
-    # Add this method to CameraProcessor
+    # ==================================================
+    # Estimated Values
+    # ==================================================
 
     def get_estimated_value(
         self,
         tool_name,
     ):
+
         if not tool_name:
             return 5.00
 
@@ -398,6 +591,10 @@ class CameraProcessor:
             ValueError,
         ):
             return 5.00
+
+    # ==================================================
+    # Metadata
+    # ==================================================
 
     def set_metadata(
         self,
@@ -418,6 +615,7 @@ class CameraProcessor:
         profit=None,
         image_date=None,
     ):
+
         self.tool = tool
         self.size_1 = size_1
         self.size_2 = size_2
@@ -425,22 +623,51 @@ class CameraProcessor:
         self.measurement = measurement
         self.drive = drive
         self.point = point
-        self.specialty_socket = specialty_socket
-        self.invoice = invoice.strip() if invoice else "DEFAULT"
-        self.ebay_id = ebay_id
+        self.specialty_socket = (
+            specialty_socket
+        )
+
+        self.invoice = (
+            invoice.strip()
+            if invoice
+            else "DEFAULT"
+        )
+
+        self.ebay_id = (
+            ebay_id.strip()
+            if ebay_id
+            else "None"
+        )
+
+        self.invoice_price = (
+            invoice_price.strip()
+            if invoice_price
+            else "0"
+        )
+
+        self.part_number = (
+            part_number.strip()
+            if part_number
+            else "NA"
+        )
+
         self.estimated_value = (
             self.get_estimated_value(
                 tool
             )
         )
+
         self.number_sold = number_sold
-        self.invoice_price = invoice_price
-        self.part_number = part_number
         self.profit = profit
         self.image_date = image_date
 
     def get_capture_output_dir(self):
-        invoice = self.invoice.strip() if self.invoice else "DEFAULT"
+
+        invoice = (
+            self.invoice.strip()
+            if self.invoice
+            else "DEFAULT"
+        )
 
         return os.path.join(
             self.output_dir,
@@ -451,7 +678,12 @@ class CameraProcessor:
         )
 
     def get_file_prefix(self):
-        invoice = self.invoice.strip() if self.invoice else "DEFAULT"
+
+        invoice = (
+            self.invoice.strip()
+            if self.invoice
+            else "DEFAULT"
+        )
 
         return (
             f"{invoice}_{self.tool}_{self.brand}_"
@@ -462,6 +694,7 @@ class CameraProcessor:
     # ==================================================
 
     def load_settings(self):
+
         self.settings.load()
 
         self.camera_width = (
@@ -481,14 +714,13 @@ class CameraProcessor:
         )
 
         self.box_manager.counting_box = (
-            list(self.settings.counting_box)
-            if self.settings.counting_box is not None
+            list(
+                self.settings.counting_box
+            )
+            if self.settings.counting_box
+            is not None
             else None
         )
-
-    # ==================================================
-    # Save Settings
-    # ==================================================
 
     def save_settings(self):
 
@@ -501,7 +733,6 @@ class CameraProcessor:
         )
 
         self.box_manager.save()
-
 
     # ==================================================
     # Mouse Callback
@@ -524,31 +755,40 @@ class CameraProcessor:
             param,
         )
 
-
     # ==================================================
     # Read Frame
     # ==================================================
 
     def read_frame(self):
 
-        success, frame = (
-            self.cap.read()
-        )
+        with self.camera_lock:
+
+            success, frame = (
+                self.cap.read()
+            )
 
         if not success:
             return None
 
         return frame
 
-
-    def set_require_red_for_automatic(self, enabled):
-        self.require_red_for_automatic = bool(enabled)
-
     # ==================================================
-    # Trigger / Crop Settings
+    # Trigger Settings
     # ==================================================
 
-    def set_trigger_mode(self, mode):
+    def set_require_red_for_automatic(
+        self,
+        enabled,
+    ):
+        self.require_red_for_automatic = bool(
+            enabled
+        )
+
+    def set_trigger_mode(
+        self,
+        mode,
+    ):
+
         if mode not in (
             TRIGGER_MANUAL,
             TRIGGER_AUTOMATIC,
@@ -558,16 +798,17 @@ class CameraProcessor:
 
         self.trigger_mode = mode
 
-        # Starting a new automatic/continuous session
-        # should allow currently tracked objects to
-        # trigger once.
         self.processed_object_ids.clear()
         self.counting_object_ids.clear()
 
         if mode != TRIGGER_CONTINUOUS:
             self.continuous_count = 0
 
-    def set_crop_mode(self, mode):
+    def set_crop_mode(
+        self,
+        mode,
+    ):
+
         if mode not in (
             CROP_MODE_EXPANDED,
             CROP_MODE_OBJECTS,
@@ -581,7 +822,15 @@ class CameraProcessor:
     def request_manual_capture(self):
         self.manual_trigger_requested = True
 
-    def get_object_type(self, obj):
+    # ==================================================
+    # Object Helpers
+    # ==================================================
+
+    def get_object_type(
+        self,
+        obj,
+    ):
+
         return (
             obj.get("class_name")
             or obj.get("label")
@@ -590,32 +839,53 @@ class CameraProcessor:
             or ""
         )
 
-    def point_inside_counting_box(self, x, y):
+    def point_inside_counting_box(
+        self,
+        x,
+        y,
+    ):
+
         if self.counting_box is None:
             return False
 
-        x1, y1, x2, y2 = self.counting_box
+        x1, y1, x2, y2 = (
+            self.counting_box
+        )
 
         return (
             x1 <= x <= x2
             and y1 <= y <= y2
         )
 
-    def object_center_inside_counting_box(self, box):
+    def object_center_inside_counting_box(
+        self,
+        box,
+    ):
+
         if box is None:
             return False
 
         x1, y1, x2, y2 = box
 
-        center_x = (x1 + x2) / 2
-        center_y = (y1 + y2) / 2
+        center_x = (
+            x1 + x2
+        ) / 2
+
+        center_y = (
+            y1 + y2
+        ) / 2
 
         return self.point_inside_counting_box(
             center_x,
             center_y,
         )
 
-    def expanded_object_box(self, box, frame):
+    def expanded_object_box(
+        self,
+        box,
+        frame,
+    ):
+
         if box is None:
             return None
 
@@ -627,50 +897,95 @@ class CameraProcessor:
         expand_x = width * 0.25
         expand_y = height * 0.25
 
-        frame_height, frame_width = frame.shape[:2]
+        frame_height, frame_width = (
+            frame.shape[:2]
+        )
 
         return [
-            max(0, int(x1 - expand_x)),
-            max(0, int(y1 - expand_y)),
-            min(frame_width, int(x2 + expand_x)),
-            min(frame_height, int(y2 + expand_y)),
+            max(
+                0,
+                int(x1 - expand_x),
+            ),
+            max(
+                0,
+                int(y1 - expand_y),
+            ),
+            min(
+                frame_width,
+                int(x2 + expand_x),
+            ),
+            min(
+                frame_height,
+                int(y2 + expand_y),
+            ),
         ]
 
-    def crop_from_box(self, frame, box):
-        if frame is None or box is None:
+    def crop_from_box(
+        self,
+        frame,
+        box,
+    ):
+
+        if (
+            frame is None
+            or box is None
+        ):
             return None
 
-        height, width = frame.shape[:2]
+        height, width = (
+            frame.shape[:2]
+        )
 
         x1, y1, x2, y2 = [
             int(value)
             for value in box
         ]
 
-        x1 = max(0, min(x1, width))
-        x2 = max(0, min(x2, width))
-        y1 = max(0, min(y1, height))
-        y2 = max(0, min(y2, height))
+        x1 = max(
+            0,
+            min(x1, width),
+        )
 
-        if x2 <= x1 or y2 <= y1:
+        x2 = max(
+            0,
+            min(x2, width),
+        )
+
+        y1 = max(
+            0,
+            min(y1, height),
+        )
+
+        y2 = max(
+            0,
+            min(y2, height),
+        )
+
+        if (
+            x2 <= x1
+            or y2 <= y1
+        ):
             return None
 
-        crop = frame[y1:y2, x1:x2].copy()
+        crop = frame[
+            y1:y2,
+            x1:x2,
+        ].copy()
 
         if crop.size == 0:
             return None
 
         return crop
 
+    # ==================================================
+    # Capture Crop
+    # ==================================================
+
     def get_capture_crop(
         self,
         frame,
         objects,
     ):
-        """
-        Return the image that should be saved according
-        to the selected crop mode.
-        """
 
         if self.crop_mode == CROP_MODE_FULL:
             return frame.copy()
@@ -682,7 +997,7 @@ class CameraProcessor:
             )
 
         if self.crop_mode == CROP_MODE_EXPANDED:
-            # Use the first triggering object.
+
             for object_id, obj in objects.items():
 
                 if obj["frames"] < MIN_FRAMES:
@@ -695,10 +1010,15 @@ class CameraProcessor:
                     obj["y"] + obj["h"],
                 ]
 
-                if self.object_center_inside_counting_box(box):
-                    expanded = self.expanded_object_box(
-                        box,
-                        frame,
+                if self.object_center_inside_counting_box(
+                    box
+                ):
+
+                    expanded = (
+                        self.expanded_object_box(
+                            box,
+                            frame,
+                        )
                     )
 
                     return self.crop_from_box(
@@ -709,6 +1029,7 @@ class CameraProcessor:
             return None
 
         if self.crop_mode == CROP_MODE_OBJECTS:
+
             boxes = []
 
             for object_id, obj in objects.items():
@@ -731,10 +1052,25 @@ class CameraProcessor:
             if not boxes:
                 return None
 
-            x1 = min(box[0] for box in boxes)
-            y1 = min(box[1] for box in boxes)
-            x2 = max(box[2] for box in boxes)
-            y2 = max(box[3] for box in boxes)
+            x1 = min(
+                box[0]
+                for box in boxes
+            )
+
+            y1 = min(
+                box[1]
+                for box in boxes
+            )
+
+            x2 = max(
+                box[2]
+                for box in boxes
+            )
+
+            y2 = max(
+                box[3]
+                for box in boxes
+            )
 
             return self.crop_from_box(
                 frame,
@@ -743,7 +1079,15 @@ class CameraProcessor:
 
         return None
 
-    def save_manual_snapshot(self, frame):
+    # ==================================================
+    # Manual Snapshot
+    # ==================================================
+
+    def save_manual_snapshot(
+        self,
+        frame,
+    ):
+
         if frame is None:
             return None
 
@@ -751,22 +1095,37 @@ class CameraProcessor:
             get_output_dir(),
             "Manual_Captures",
         )
-        os.makedirs(output_dir, exist_ok=True)
 
-        timestamp = datetime.now().strftime(
-            "%Y%m%d_%H%M%S_%f"
+        os.makedirs(
+            output_dir,
+            exist_ok=True,
         )
 
-        filename = f"ManualCapture_{timestamp}.jpg"
+        timestamp = (
+            datetime.now().strftime(
+                "%Y%m%d_%H%M%S_%f"
+            )
+        )
+
+        filename = (
+            f"ManualCapture_{timestamp}.jpg"
+        )
+
         filepath = os.path.join(
             output_dir,
             filename,
         )
 
-        if not cv2.imwrite(filepath, frame):
+        if not cv2.imwrite(
+            filepath,
+            frame,
+        ):
             return None
 
-        print(f"Saved manual snapshot: {filepath}")
+        print(
+            f"Saved manual snapshot: {filepath}"
+        )
+
         return filepath
 
     # ==================================================
@@ -779,10 +1138,16 @@ class CameraProcessor:
         objects,
         object_id=None,
     ):
-        if not self.tool or not self.brand:
+
+        if (
+            not self.tool
+            or not self.brand
+        ):
+
             print(
                 "Tool and brand must be selected before capturing."
             )
+
             return None
 
         crop = self.get_capture_crop(
@@ -799,14 +1164,18 @@ class CameraProcessor:
             get_output_dir()
         )
 
-        output_dir = self.get_capture_output_dir()
+        output_dir = (
+            self.get_capture_output_dir()
+        )
 
         os.makedirs(
             output_dir,
             exist_ok=True,
         )
 
-        crop_number = self.get_next_tool_number()
+        crop_number = (
+            self.get_next_tool_number()
+        )
 
         if crop_number is None:
             return None
@@ -822,13 +1191,6 @@ class CameraProcessor:
             filename,
         )
 
-        if not cv2.imwrite(filepath, crop):
-            return None
-
-        # -------------------------
-        # Save raw metadata JSON
-        # -------------------------
-
         json_filename = (
             f"{prefix}{crop_number:03d}_Logged.json"
         )
@@ -838,12 +1200,16 @@ class CameraProcessor:
             json_filename,
         )
 
-        absolute_image_path = os.path.abspath(
-            filepath,
+        absolute_image_path = (
+            os.path.abspath(
+                filepath
+            )
         )
 
-        absolute_json_path = os.path.abspath(
-            json_filepath,
+        absolute_json_path = (
+            os.path.abspath(
+                json_filepath
+            )
         )
 
         metadata = {
@@ -855,7 +1221,11 @@ class CameraProcessor:
             "Drive": self.drive,
             "Point": self.point,
             "Specialty Socket": self.specialty_socket,
-            "Invoice": self.invoice.strip() if self.invoice else "DEFAULT",
+            "Invoice": (
+                self.invoice.strip()
+                if self.invoice
+                else "DEFAULT"
+            ),
             "eBay ID": self.ebay_id,
             "Part Number": self.part_number,
             "Invoice Price": self.invoice_price,
@@ -865,12 +1235,24 @@ class CameraProcessor:
             "File Path to JSON": absolute_json_path,
         }
 
+        if not cv2.imwrite(
+            filepath,
+            crop,
+        ):
+            print(
+                f"ERROR: Could not save image: "
+                f"{filepath}"
+            )
+            return None
+
         session_entry = {
             "json_path": absolute_json_path,
             "image_path": absolute_image_path,
             "tool_name": self.tool,
             "brand_name": self.brand,
-            "display_name": f"{self.tool} / {self.brand}",
+            "display_name": (
+                f"{self.tool} / {self.brand}"
+            ),
         }
 
         self.recent_session_crops.insert(
@@ -878,10 +1260,16 @@ class CameraProcessor:
             session_entry,
         )
 
-        if len(self.recent_session_crops) > 25:
+        if len(
+            self.recent_session_crops
+        ) > 25:
+
             self.recent_session_crops = (
                 self.recent_session_crops[:25]
             )
+
+        if self.recent_crops_callback:
+            self.recent_crops_callback()
 
         try:
 
@@ -907,10 +1295,6 @@ class CameraProcessor:
 
             return None
 
-        # -------------------------
-        # Send JSON to logger
-        # -------------------------
-
         submit_json(
             absolute_json_path
         )
@@ -928,86 +1312,37 @@ class CameraProcessor:
 
         return filepath
 
-
-    # ==================================================
-    # Process Frame
-    # ==================================================
-
-    def process_frame(self, frame):
-        """Process one camera frame and return the display frame + detection count."""
-
-        with time_block(
-            "camera.process_frame",
-            trigger_mode=self.trigger_mode,
-            frame_shape=frame.shape[:2],
-        ):
-            self.box_manager.initialize(frame)
-
-            original_frame = frame.copy()
-
-            detections = self._detect_objects(frame)
-            objects = self._update_tracked_objects(detections)
-
-            current_time = self._get_current_capture_time()
-            red_detected = self._check_red_scan(original_frame)
-
-            objects_inside = self._process_tracked_objects(
-                frame=frame,
-                original_frame=original_frame,
-                objects=objects,
-                red_detected=red_detected,
-                current_time=current_time,
-            )
-
-            self._handle_manual_capture(
-                original_frame=original_frame,
-                objects=objects,
-            )
-
-            self._update_counting_state(objects_inside)
-
-            self._draw_frame_overlay(
-                frame=frame,
-                detection_count=len(detections),
-            )
-
-            return frame, len(detections)
-
     # ==================================================
     # Detection / Tracking
     # ==================================================
 
     def _detect_objects(self, frame):
-        """Run object detection only when the detection interval allows it."""
-
         now = time.monotonic()
+
         should_detect = (
             now - self.last_detection_time >= self.detection_interval
             or not self.tracker.objects
         )
 
         if not should_detect:
-            return []
+            return None
 
-        with time_block(
-            "camera.detect",
-            trigger_mode=self.trigger_mode,
-        ):
-            detections = self.tracker.detect(frame)
+        detections = self.tracker.detect(frame)
 
         self.last_detection_time = now
+
         return detections
 
     def _update_tracked_objects(self, detections):
-        """Update the tracker using the latest detections."""
+        if detections is None:
+            return self.tracker.objects
 
-        with time_block(
-            "camera.update_objects",
-            detection_count=len(detections),
-        ):
-            return self.tracker.update(detections)
+        return self.tracker.update(detections)
 
-    def _get_current_capture_time(self):
+    def _get_current_capture_time(
+        self,
+    ):
+
         return (
             cv2.getTickCount()
             / cv2.getTickFrequency()
@@ -1017,15 +1352,22 @@ class CameraProcessor:
     # Automatic Scan / Red Detection
     # ==================================================
 
-    def _check_red_scan(self, frame):
+    def _check_red_scan(
+        self,
+        frame,
+    ):
+
         if (
-            self.trigger_mode != TRIGGER_AUTOMATIC
+            self.trigger_mode
+            != TRIGGER_AUTOMATIC
             or not self.require_red_for_automatic
             or self.scan_box is None
         ):
             return True
 
-        return self.has_red_in_scan_area(frame)
+        return self.has_red_in_scan_area(
+            frame
+        )
 
     # ==================================================
     # Tracked Object Processing
@@ -1039,26 +1381,30 @@ class CameraProcessor:
         red_detected,
         current_time,
     ):
-        """Evaluate each tracked object for drawing, capture, or counting."""
 
         objects_inside = set()
 
         for object_id, obj in objects.items():
 
-            object_box = self._get_object_box(obj)
+            object_box = (
+                self._get_object_box(obj)
+            )
 
-            center_inside = self.object_center_inside_counting_box(
-                object_box
+            center_inside = (
+                self.object_center_inside_counting_box(
+                    object_box
+                )
             )
 
             if center_inside:
-                objects_inside.add(object_id)
+                objects_inside.add(
+                    object_id
+                )
 
-            # An object is considered to have entered when it is
-            # inside now but was not inside during the previous frame.
             object_entered = (
                 center_inside
-                and object_id not in self.counting_object_ids
+                and object_id
+                not in self.counting_object_ids
             )
 
             self._draw_tracked_object(
@@ -1080,8 +1426,10 @@ class CameraProcessor:
 
         return objects_inside
 
-    def _get_object_box(self, obj):
-        """Convert a tracker object into [x1, y1, x2, y2]."""
+    def _get_object_box(
+        self,
+        obj,
+    ):
 
         return [
             obj["x"],
@@ -1096,20 +1444,11 @@ class CameraProcessor:
         object_id,
         obj,
     ):
-        """Draw the tracking box, center point, ID, and tracking state."""
 
         x = obj["x"]
         y = obj["y"]
         w = obj["w"]
         h = obj["h"]
-
-        # Keep the visual overlay active as soon as an object is tracked,
-        # even before it reaches MIN_FRAMES.
-        if (
-            obj["frames"] < MIN_FRAMES
-            and obj.get("missed_frames", 0) > MAX_MISSED_FRAMES
-        ):
-            return
 
         cv2.rectangle(
             frame,
@@ -1119,8 +1458,13 @@ class CameraProcessor:
             2,
         )
 
-        center_x = x + (w // 2)
-        center_y = y + (h // 2)
+        center_x = x + (
+            w // 2
+        )
+
+        center_y = y + (
+            h // 2
+        )
 
         cv2.circle(
             frame,
@@ -1133,7 +1477,13 @@ class CameraProcessor:
         cv2.putText(
             frame,
             f"ID: {object_id}",
-            (x, max(y - 25, 20)),
+            (
+                x,
+                max(
+                    y - 25,
+                    20,
+                ),
+            ),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,
             (0, 255, 0),
@@ -1149,7 +1499,13 @@ class CameraProcessor:
         cv2.putText(
             frame,
             label,
-            (x, max(y - 5, 40)),
+            (
+                x,
+                max(
+                    y - 5,
+                    40,
+                ),
+            ),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
             (255, 255, 0),
@@ -1171,7 +1527,6 @@ class CameraProcessor:
         red_detected,
         current_time,
     ):
-        """Apply the active trigger mode to one tracked object."""
 
         if self.trigger_mode == TRIGGER_AUTOMATIC:
 
@@ -1188,7 +1543,10 @@ class CameraProcessor:
 
             return
 
-        if self.trigger_mode == TRIGGER_CONTINUOUS:
+        if (
+            self.trigger_mode
+            == TRIGGER_CONTINUOUS
+        ):
 
             self._handle_continuous_counting(
                 original_frame=original_frame,
@@ -1208,9 +1566,6 @@ class CameraProcessor:
         red_detected,
         current_time,
     ):
-        """Return True when an object has entered and satisfies
-        all automatic capture conditions.
-        """
 
         if not object_entered:
             return False
@@ -1224,14 +1579,21 @@ class CameraProcessor:
         if not red_detected:
             return False
 
-        if object_id in self.processed_object_ids:
+        if (
+            object_id
+            in self.processed_object_ids
+        ):
             return False
 
         time_since_capture = (
-            current_time - self.last_capture_time
+            current_time
+            - self.last_capture_time
         )
 
-        if time_since_capture < CAPTURE_INTERVAL:
+        if (
+            time_since_capture
+            < CAPTURE_INTERVAL
+        ):
             return False
 
         return True
@@ -1247,7 +1609,6 @@ class CameraProcessor:
         red_detected,
         current_time,
     ):
-        """Capture once when an object enters the counting box."""
 
         if not self._should_automatic_capture(
             object_id=object_id,
@@ -1260,23 +1621,24 @@ class CameraProcessor:
             return
 
         if self.metadata_sync_callback:
+
             self.metadata_sync_callback()
 
-        with time_block(
-            "camera.capture_counting_area",
-            object_id=object_id,
-            object_count=len(objects),
-        ):
-            saved_filename = self.capture_counting_area(
+        saved_filename = (
+            self.capture_counting_area(
                 original_frame,
                 objects,
                 object_id,
             )
+        )
 
         if not saved_filename:
             return
 
-        self.processed_object_ids.add(object_id)
+        self.processed_object_ids.add(
+            object_id
+        )
+
         obj["captured"] = True
 
     def _handle_continuous_counting(
@@ -1288,9 +1650,6 @@ class CameraProcessor:
         center_inside,
         object_entered,
     ):
-        """Capture and count each tracked object once when it enters
-        the counting box.
-        """
 
         if not object_entered:
             return
@@ -1301,27 +1660,29 @@ class CameraProcessor:
         if not center_inside:
             return
 
-        if object_id in self.processed_object_ids:
+        if (
+            object_id
+            in self.processed_object_ids
+        ):
             return
 
         if self.metadata_sync_callback:
             self.metadata_sync_callback()
 
-        with time_block(
-            "camera.capture_continuous",
-            object_id=object_id,
-            object_count=len(objects),
-        ):
-            saved_filename = self.capture_counting_area(
+        saved_filename = (
+            self.capture_counting_area(
                 original_frame,
                 objects,
                 object_id,
             )
+        )
 
         if not saved_filename:
             return
 
-        self.processed_object_ids.add(object_id)
+        self.processed_object_ids.add(
+            object_id
+        )
 
         self.continuous_count += 1
 
@@ -1336,40 +1697,54 @@ class CameraProcessor:
         original_frame,
         objects,
     ):
-        """Handle a pending manual capture request."""
 
         if not self.manual_trigger_requested:
             return
 
         self.manual_trigger_requested = False
 
-        manual_objects = self._get_manual_capture_objects(
-            objects
+        manual_objects = (
+            self._get_manual_capture_objects(
+                objects
+            )
         )
 
-        if manual_objects or not self.show_counting_box:
+        if (
+            manual_objects
+            or not self.show_counting_box
+        ):
+
             self._capture_manual_objects(
                 original_frame=original_frame,
                 manual_objects=manual_objects,
             )
-            return
 
-    def _get_manual_capture_objects(self, objects):
-        # If the counting box is disabled, manual capture does not
-        # require a detected/tracked object.
+    def _get_manual_capture_objects(
+        self,
+        objects,
+    ):
+
         if not self.show_counting_box:
             return objects
 
         manual_objects = {}
 
         for object_id, obj in objects.items():
+
             if obj["frames"] < MIN_FRAMES:
                 continue
 
-            object_box = self._get_object_box(obj)
+            object_box = (
+                self._get_object_box(obj)
+            )
 
-            if self.object_center_inside_counting_box(object_box):
-                manual_objects[object_id] = obj
+            if self.object_center_inside_counting_box(
+                object_box
+            ):
+
+                manual_objects[
+                    object_id
+                ] = obj
 
         return manual_objects
 
@@ -1378,19 +1753,16 @@ class CameraProcessor:
         original_frame,
         manual_objects,
     ):
-        """Capture all objects currently eligible for a manual capture."""
 
         if self.metadata_sync_callback:
             self.metadata_sync_callback()
 
-        with time_block(
-            "camera.capture_manual",
-            object_count=len(manual_objects),
-        ):
-            saved_filename = self.capture_counting_area(
+        saved_filename = (
+            self.capture_counting_area(
                 original_frame,
                 manual_objects,
             )
+        )
 
         if not saved_filename:
             return
@@ -1402,8 +1774,10 @@ class CameraProcessor:
     # Counting State
     # ==================================================
 
-    def _update_counting_state(self, objects_inside):
-        """Allow processed objects to be processed again after leaving the box."""
+    def _update_counting_state(
+        self,
+        objects_inside,
+    ):
 
         objects_that_left = (
             self.counting_object_ids
@@ -1414,7 +1788,9 @@ class CameraProcessor:
             objects_that_left
         )
 
-        self.counting_object_ids = objects_inside
+        self.counting_object_ids = (
+            objects_inside
+        )
 
     # ==================================================
     # Frame Overlay
@@ -1425,12 +1801,12 @@ class CameraProcessor:
         frame,
         detection_count,
     ):
-        """Draw counters and configured camera boxes on the display frame."""
 
         self._draw_detection_count(
             frame,
             detection_count,
         )
+
         self._draw_scan_box(frame)
         self._draw_crop_box(frame)
         self._draw_counting_box(frame)
@@ -1440,6 +1816,7 @@ class CameraProcessor:
         frame,
         detection_count,
     ):
+
         cv2.putText(
             frame,
             f"Objects: {detection_count}",
@@ -1450,7 +1827,11 @@ class CameraProcessor:
             2,
         )
 
-        if self.trigger_mode == TRIGGER_CONTINUOUS:
+        if (
+            self.trigger_mode
+            == TRIGGER_CONTINUOUS
+        ):
+
             cv2.putText(
                 frame,
                 f"Count: {self.continuous_count}",
@@ -1461,11 +1842,17 @@ class CameraProcessor:
                 2,
             )
 
-    def _draw_scan_box(self, frame):
+    def _draw_scan_box(
+        self,
+        frame,
+    ):
+
         if self.scan_box is None:
             return
 
-        x1, y1, x2, y2 = self.scan_box
+        x1, y1, x2, y2 = (
+            self.scan_box
+        )
 
         cv2.rectangle(
             frame,
@@ -1478,19 +1865,40 @@ class CameraProcessor:
         cv2.putText(
             frame,
             "Scan Dot",
-            (x1 - 10, max(y1 - 10, 20)),
+            (
+                x1 - 10,
+                max(
+                    y1 - 10,
+                    20,
+                ),
+            ),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
             (255, 0, 255),
             2,
         )
 
-    def _draw_crop_box(self, frame):
-        if self.crop_box is None or not self.show_crop_box:
+    def _draw_crop_box(
+        self,
+        frame,
+    ):
+
+        if (
+            self.crop_box is None
+            or not self.show_crop_box
+        ):
             return
 
-        x1, y1, x2, y2 = self.crop_box
-        color_crop = (0, 255, 255)
+        x1, y1, x2, y2 = (
+            self.crop_box
+        )
+
+        color_crop = (
+            0,
+            255,
+            255,
+        )
+
         cv2.rectangle(
             frame,
             (x1, y1),
@@ -1502,19 +1910,40 @@ class CameraProcessor:
         cv2.putText(
             frame,
             "Preview Crop",
-            (x1 - 10, max(y1 - 10, 20)),
+            (
+                x1 - 10,
+                max(
+                    y1 - 10,
+                    20,
+                ),
+            ),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
             color_crop,
             2,
         )
 
-    def _draw_counting_box(self, frame):
-        if self.counting_box is None or not self.show_counting_box:
+    def _draw_counting_box(
+        self,
+        frame,
+    ):
+
+        if (
+            self.counting_box is None
+            or not self.show_counting_box
+        ):
             return
 
-        x1, y1, x2, y2 = self.counting_box
-        color_count = (255,255,0)
+        x1, y1, x2, y2 = (
+            self.counting_box
+        )
+
+        color_count = (
+            255,
+            255,
+            0,
+        )
+
         cv2.rectangle(
             frame,
             (x1, y1),
@@ -1526,7 +1955,13 @@ class CameraProcessor:
         cv2.putText(
             frame,
             "Counting Box",
-            (x1 - 10, max(y1 - 10, 20)),
+            (
+                x1 - 10,
+                max(
+                    y1 - 10,
+                    20,
+                ),
+            ),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
             color_count,
@@ -1538,36 +1973,63 @@ class CameraProcessor:
     # ==================================================
 
     def get_next_tool_number(self):
-        """Get the next sequential number for the current tool and brand."""
-        if not self.tool or not self.brand:
+
+        if (
+            not self.tool
+            or not self.brand
+        ):
             return None
 
         self.output_dir = os.path.abspath(
             get_output_dir()
         )
 
-        output_dir = self.get_capture_output_dir()
+        output_dir = (
+            self.get_capture_output_dir()
+        )
 
-        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(
+            output_dir,
+            exist_ok=True,
+        )
 
         prefix = self.get_file_prefix()
 
         existing_files = [
-            f for f in os.listdir(output_dir)
-            if f.startswith(prefix) and f.endswith(".jpg")
+            f
+            for f in os.listdir(output_dir)
+            if (
+                f.startswith(prefix)
+                and f.endswith(".jpg")
+            )
         ]
 
         numbers = []
 
         for filename in existing_files:
+
             try:
-                number_part = filename[len(prefix):].split("_")[0]
-                numbers.append(int(number_part))
-            except (ValueError, IndexError):
+
+                number_part = (
+                    filename[
+                        len(prefix):
+                    ].split("_")[0]
+                )
+
+                numbers.append(
+                    int(number_part)
+                )
+
+            except (
+                ValueError,
+                IndexError,
+            ):
                 continue
 
-        return max(numbers, default=0) + 1
-
+        return max(
+            numbers,
+            default=0,
+        ) + 1
 
     # ==================================================
     # Set Box Display
@@ -1620,10 +2082,6 @@ class CameraProcessor:
             frame.shape[:2]
         )
 
-        # -------------------------
-        # Clamp crop coordinates
-        # -------------------------
-
         x1 = max(
             0,
             min(
@@ -1662,10 +2120,6 @@ class CameraProcessor:
         ):
             return None
 
-        # -------------------------
-        # Crop frame
-        # -------------------------
-
         crop = frame[
             y1:y2,
             x1:x2,
@@ -1680,12 +2134,21 @@ class CameraProcessor:
     # Capture
     # ==================================================
 
-    def capture_object(self, frame, box):
-        """Capture and save the detected object image."""
-        if not self.tool or not self.brand:
+    def capture_object(
+        self,
+        frame,
+        box,
+    ):
+
+        if (
+            not self.tool
+            or not self.brand
+        ):
+
             print(
                 "Tool and brand must be selected before capturing."
             )
+
             return None
 
         if frame is None:
@@ -1693,21 +2156,24 @@ class CameraProcessor:
 
         original = frame.copy()
 
-
         today = datetime.now()
 
         self.output_dir = os.path.abspath(
             get_output_dir()
         )
 
-        output_dir = self.get_capture_output_dir()
+        output_dir = (
+            self.get_capture_output_dir()
+        )
 
         os.makedirs(
             output_dir,
             exist_ok=True,
         )
 
-        crop_number = self.get_next_tool_number()
+        crop_number = (
+            self.get_next_tool_number()
+        )
 
         if crop_number is None:
             return None
@@ -1723,10 +2189,6 @@ class CameraProcessor:
             filename,
         )
 
-        # -------------------------
-        # Save raw metadata JSON
-        # -------------------------
-
         json_filename = (
             f"{prefix}{crop_number:03d}_Logged.json"
         )
@@ -1736,12 +2198,14 @@ class CameraProcessor:
             json_filename,
         )
 
-        absolute_image_path = os.path.abspath(
-            filepath,
+        absolute_image_path = (
+            os.path.abspath(filepath)
         )
 
-        absolute_json_path = os.path.abspath(
-            json_filepath,
+        absolute_json_path = (
+            os.path.abspath(
+                json_filepath
+            )
         )
 
         metadata = {
@@ -1753,7 +2217,11 @@ class CameraProcessor:
             "Drive": self.drive,
             "Point": self.point,
             "Specialty Socket": self.specialty_socket,
-            "Invoice": self.invoice.strip() if self.invoice else "DEFAULT",
+            "Invoice": (
+                self.invoice.strip()
+                if self.invoice
+                else "DEFAULT"
+            ),
             "eBay ID": self.ebay_id,
             "Part Number": self.part_number,
             "Estimated Value": self.estimated_value,
@@ -1766,12 +2234,23 @@ class CameraProcessor:
             "File Path to JSON": absolute_json_path,
         }
 
+        if not cv2.imwrite(
+            filepath,
+            original,
+        ):
+            print(
+                f"ERROR: Could not save image: "
+                f"{filepath}"
+            )
+            return None
+
         try:
             with open(
                 json_filepath,
                 "w",
                 encoding="utf-8",
             ) as file:
+
                 json.dump(
                     metadata,
                     file,
@@ -1780,15 +2259,13 @@ class CameraProcessor:
                 )
 
         except OSError as error:
+
             print(
                 f"ERROR: Could not save metadata JSON: "
                 f"{error}"
             )
-            return None
 
-        # -------------------------
-        # Send JSON to logger
-        # -------------------------
+            return None
 
         submit_json(
             absolute_json_path
@@ -1822,14 +2299,19 @@ class CameraProcessor:
         ):
             return False
 
-        obj_x1, obj_y1, obj_x2, obj_y2 = box
-        crop_x1, crop_y1, crop_x2, crop_y2 = (
-            self.crop_box
-        )
+        (
+            obj_x1,
+            obj_y1,
+            obj_x2,
+            obj_y2,
+        ) = box
 
-        # -------------------------
-        # Object center point
-        # -------------------------
+        (
+            crop_x1,
+            crop_y1,
+            crop_x2,
+            crop_y2,
+        ) = self.crop_box
 
         center_x = (
             obj_x1 + obj_x2
@@ -1847,10 +2329,6 @@ class CameraProcessor:
 
         if not center_inside:
             return False
-
-        # -------------------------
-        # Intersection
-        # -------------------------
 
         intersection_x1 = max(
             obj_x1,
@@ -1873,8 +2351,10 @@ class CameraProcessor:
         )
 
         if (
-            intersection_x2 <= intersection_x1
-            or intersection_y2 <= intersection_y1
+            intersection_x2
+            <= intersection_x1
+            or intersection_y2
+            <= intersection_y1
         ):
             return False
 
@@ -1886,22 +2366,16 @@ class CameraProcessor:
             - intersection_y1
         )
 
-        # -------------------------
-        # Object area
-        # -------------------------
-
         object_area = (
-            obj_x2 - obj_x1
+            obj_x2
+            - obj_x1
         ) * (
-            obj_y2 - obj_y1
+            obj_y2
+            - obj_y1
         )
 
         if object_area <= 0:
             return False
-
-        # -------------------------
-        # Percentage inside crop
-        # -------------------------
 
         percentage_inside = (
             intersection_area
@@ -1963,17 +2437,13 @@ class CameraProcessor:
 
         scan_area = frame[
             y1:y2,
-            x1:x2
+            x1:x2,
         ]
 
         hsv = cv2.cvtColor(
             scan_area,
             cv2.COLOR_BGR2HSV,
         )
-
-        # -------------------------
-        # Red wraps around HSV
-        # -------------------------
 
         lower_red_1 = (
             0,
@@ -2016,10 +2486,8 @@ class CameraProcessor:
             mask2,
         )
 
-        red_pixels = (
-            cv2.countNonZero(
-                red_mask
-            )
+        red_pixels = cv2.countNonZero(
+            red_mask
         )
 
         total_pixels = (
@@ -2041,19 +2509,34 @@ class CameraProcessor:
             >= MIN_RED_PERCENT
         )
 
-
     # ==================================================
     # Release Camera
     # ==================================================
 
     def release(self):
 
+        self.processing_running = False
+
+        with self.processing_condition:
+
+            self.processing_condition.notify_all()
+
+        if (
+            self.processing_thread
+            is not None
+            and self.processing_thread.is_alive()
+        ):
+
+            self.processing_thread.join(
+                timeout=1.0
+            )
+
         self.save_settings()
 
-        if self.cap.isOpened():
+        with self.camera_lock:
 
-            self.cap.release()
-
+            if self.cap.isOpened():
+                self.cap.release()
 
     # ==================================================
     # Reopen Camera
@@ -2061,26 +2544,27 @@ class CameraProcessor:
 
     def reopen_camera(self):
 
-        if self.cap.isOpened():
+        with self.camera_lock:
 
-            self.cap.release()
+            if self.cap.isOpened():
+                self.cap.release()
 
-        self.cap = cv2.VideoCapture(
-            self.video_source
-        )
-
-        if not self.cap.isOpened():
-
-            raise RuntimeError(
-                f"Could not reopen video source: "
-                f"{self.video_source}"
+            self.cap = cv2.VideoCapture(
+                self.video_source
             )
 
-        self.apply_camera_resolution()
+            if not self.cap.isOpened():
 
-        success, frame = (
-            self.cap.read()
-        )
+                raise RuntimeError(
+                    f"Could not reopen video source: "
+                    f"{self.video_source}"
+                )
+
+            self.apply_camera_resolution()
+
+            success, frame = (
+                self.cap.read()
+            )
 
         if (
             not success
@@ -2095,7 +2579,6 @@ class CameraProcessor:
             return False
 
         return True
-
 
     # ==================================================
     # Apply Camera Resolution
@@ -2150,7 +2633,6 @@ class CameraProcessor:
                 f"{actual_height}"
             )
 
-
     # ==================================================
     # Set Camera Resolution
     # ==================================================
@@ -2184,38 +2666,20 @@ class CameraProcessor:
             and resolution[1]
             == self.camera_height
         ):
-
             return True
 
-        old_width = (
-            self.camera_width
-        )
-
-        old_height = (
-            self.camera_height
-        )
+        old_width = self.camera_width
+        old_height = self.camera_height
 
         print(
             f"Changing camera resolution from "
             f"{old_width}x{old_height} to "
-            f"{resolution[0]}x{resolution[1]}"
+            f"{resolution[0]}x"
+            f"{resolution[1]}"
         )
 
-        # -------------------------
-        # Change resolution
-        # -------------------------
-
-        self.camera_width = (
-            resolution[0]
-        )
-
-        self.camera_height = (
-            resolution[1]
-        )
-
-        # -------------------------
-        # Reopen camera
-        # -------------------------
+        self.camera_width = resolution[0]
+        self.camera_height = resolution[1]
 
         if not self.reopen_camera():
 
@@ -2232,10 +2696,6 @@ class CameraProcessor:
 
             return False
 
-        # -------------------------
-        # Test stream
-        # -------------------------
-
         success, test_frame = (
             self.cap.read()
         )
@@ -2251,42 +2711,31 @@ class CameraProcessor:
                 f"{self.camera_height}."
             )
 
-            self.cap.release()
+            with self.camera_lock:
 
-            self.cap = cv2.VideoCapture(
-                self.video_source
-            )
+                self.cap.release()
 
-            if self.cap.isOpened():
-
-                self.camera_width = (
-                    old_width
+                self.cap = cv2.VideoCapture(
+                    self.video_source
                 )
 
-                self.camera_height = (
-                    old_height
-                )
+                if self.cap.isOpened():
 
-                self.apply_camera_resolution()
+                    self.camera_width = old_width
+                    self.camera_height = old_height
 
-            else:
+                    self.apply_camera_resolution()
 
-                print(
-                    "Could not restore previous "
-                    "camera stream."
-                )
+                else:
+
+                    print(
+                        "Could not restore previous "
+                        "camera stream."
+                    )
 
             return False
 
-        # -------------------------
-        # Reset tracking
-        # -------------------------
-
         self.tracker.reset()
-
-        # -------------------------
-        # Scale boxes
-        # -------------------------
 
         self.box_manager.scale_boxes(
             old_width,
@@ -2294,10 +2743,6 @@ class CameraProcessor:
             self.camera_width,
             self.camera_height,
         )
-
-        # -------------------------
-        # Save settings
-        # -------------------------
 
         self.save_settings()
 
@@ -2308,7 +2753,6 @@ class CameraProcessor:
         )
 
         return True
-
 
     # ==================================================
     # Get Supported Resolutions
@@ -2324,96 +2768,94 @@ class CameraProcessor:
 
         supported = []
 
-        current_width = int(
-            self.cap.get(
-                cv2.CAP_PROP_FRAME_WIDTH
-            )
-        )
+        with self.camera_lock:
 
-        current_height = int(
-            self.cap.get(
-                cv2.CAP_PROP_FRAME_HEIGHT
-            )
-        )
-
-        print()
-        print(
-            "================================"
-        )
-        print(
-            "TESTING CAMERA RESOLUTIONS"
-        )
-        print(
-            "================================"
-        )
-
-        for (
-            width,
-            height,
-        ) in resolutions_to_test:
-
-            self.cap.set(
-                cv2.CAP_PROP_FRAME_WIDTH,
-                width,
-            )
-
-            self.cap.set(
-                cv2.CAP_PROP_FRAME_HEIGHT,
-                height,
-            )
-
-            actual_width = int(
+            current_width = int(
                 self.cap.get(
                     cv2.CAP_PROP_FRAME_WIDTH
                 )
             )
 
-            actual_height = int(
+            current_height = int(
                 self.cap.get(
                     cv2.CAP_PROP_FRAME_HEIGHT
                 )
             )
 
-            if (
-                actual_width == width
-                and actual_height == height
-            ):
+            print()
+            print(
+                "================================"
+            )
+            print(
+                "TESTING CAMERA RESOLUTIONS"
+            )
+            print(
+                "================================"
+            )
 
-                supported.append(
-                    (
-                        width,
-                        height,
+            for (
+                width,
+                height,
+            ) in resolutions_to_test:
+
+                self.cap.set(
+                    cv2.CAP_PROP_FRAME_WIDTH,
+                    width,
+                )
+
+                self.cap.set(
+                    cv2.CAP_PROP_FRAME_HEIGHT,
+                    height,
+                )
+
+                actual_width = int(
+                    self.cap.get(
+                        cv2.CAP_PROP_FRAME_WIDTH
                     )
                 )
 
-                print(
-                    f"SUPPORTED: "
-                    f"{width}x{height}"
+                actual_height = int(
+                    self.cap.get(
+                        cv2.CAP_PROP_FRAME_HEIGHT
+                    )
                 )
 
-            else:
+                if (
+                    actual_width == width
+                    and actual_height == height
+                ):
 
-                print(
-                    f"NOT SUPPORTED: "
-                    f"{width}x{height}"
-                    f" -> "
-                    f"{actual_width}x"
-                    f"{actual_height}"
-                )
+                    supported.append(
+                        (
+                            width,
+                            height,
+                        )
+                    )
 
-        # -------------------------
-        # Restore resolution
-        # -------------------------
+                    print(
+                        f"SUPPORTED: "
+                        f"{width}x{height}"
+                    )
 
-        self.cap.set(
-            cv2.CAP_PROP_FRAME_WIDTH,
-            current_width,
-        )
+                else:
 
-        self.cap.set(
-            cv2.CAP_PROP_FRAME_HEIGHT,
-            current_height,
-        )
+                    print(
+                        f"NOT SUPPORTED: "
+                        f"{width}x{height}"
+                        f" -> "
+                        f"{actual_width}x"
+                        f"{actual_height}"
+                    )
+
+            self.cap.set(
+                cv2.CAP_PROP_FRAME_WIDTH,
+                current_width,
+            )
+
+            self.cap.set(
+                cv2.CAP_PROP_FRAME_HEIGHT,
+                current_height,
+            )
 
         print(
             "================================"

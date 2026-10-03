@@ -1,8 +1,11 @@
 import multiprocessing
-import tkinter as tk
+import sys
 
-from gui import ToolScannerGUI
-from performance_debug import print_perf_summary
+from PySide6.QtWidgets import QApplication
+
+from GUI.gui import ToolScannerGUI
+
+
 
 # ==================================================
 # Main
@@ -12,11 +15,12 @@ if __name__ == "__main__":
 
     multiprocessing.freeze_support()
 
-    root = tk.Tk()
+    app = QApplication(sys.argv)
 
-    app = ToolScannerGUI(
-        root
-    )
+    window = ToolScannerGUI()
 
-    root.mainloop()
-    print_perf_summary()
+    window.show()
+
+    exit_code = app.exec()
+
+    sys.exit(exit_code)

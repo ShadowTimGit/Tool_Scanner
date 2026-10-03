@@ -1,5 +1,4 @@
 from settings_menu.settings import SettingsWindow
-from settings_menu.brand_settings import BrandSettings
 from settings_menu.metadata_settings import MetadataSettings
 from settings_menu.tool_settings import ToolSettings
 
@@ -15,18 +14,18 @@ class ToolsMixin:
             return
 
         self.camera.set_metadata(
-            tool=self.tool_var.get(),
-            size_1=self.size_var.get(),
-            size_2=self.size_2_var.get(),
-            brand=self.brand_var.get(),
-            measurement=self.measurement_var.get(),
-            drive=self.drive_var.get(),
-            point=self.point_var.get(),
-            specialty_socket=self.specialty_socket_var.get(),
-            invoice=self.invoice_var.get(),
-            ebay_id=self.ebay_id_var.get(),
-            part_number=self.part_number_var.get(),
-            invoice_price=self.invoice_price_var.get(),
+            tool=self.tool_dropdown.currentText(),
+            size_1=self.size_dropdown.get(),
+            size_2=self.size_2_dropdown.get(),
+            brand=self.brand_dropdown.currentText(),
+            measurement=self.measurement_dropdown.currentText(),
+            drive=self.drive_dropdown.currentText(),
+            point=self.point_dropdown.currentText(),
+            specialty_socket=self.specialty_socket_dropdown.currentText(),
+            invoice=self.invoice_entry.text(),
+            ebay_id=self.ebay_id_entry.text(),
+            part_number=self.part_number_entry.text(),
+            invoice_price=self.invoice_price_entry.text(),
         )
 
     # ---------------------------------------------------------
@@ -39,7 +38,6 @@ class ToolsMixin:
         self.refresh_metadata_dropdowns()
         self.update_camera_metadata()
 
-
     # ---------------------------------------------------------
     # Brand
     # ---------------------------------------------------------
@@ -49,33 +47,42 @@ class ToolsMixin:
             self.brands.keys()
         )
 
-        self.brand_dropdown["values"] = brand_names
+        current_brand = self.brand_dropdown.currentText()
+
+        self.brand_dropdown.clear()
+        self.brand_dropdown.addItems(brand_names)
 
         if self.selected_brand in brand_names:
-            self.brand_var.set(
+            index = brand_names.index(
                 self.selected_brand
             )
+
+        elif current_brand in brand_names:
+            index = brand_names.index(
+                current_brand
+            )
+            self.selected_brand = current_brand
 
         elif brand_names:
+            index = 0
             self.selected_brand = brand_names[0]
 
-            self.brand_var.set(
-                self.selected_brand
-            )
-
         else:
+            index = -1
             self.selected_brand = ""
-            self.brand_var.set("")
+
+        if index >= 0:
+            self.brand_dropdown.setCurrentIndex(index)
 
         self.update_camera_metadata()
 
-    def on_brand_selected(self, event=None):
-        self.selected_brand = self.brand_var.get()
+    def on_brand_selected(self, index=None):
+        self.selected_brand = self.brand_dropdown.currentText()
 
         self.update_camera_metadata()
 
     def brands_changed(self):
-        self.brands = BrandSettings.load_brands()
+        self.brands = ToolSettings.load_brands()
 
         self.refresh_brand_dropdown()
 
@@ -83,140 +90,163 @@ class ToolsMixin:
     # Tool
     # ---------------------------------------------------------
 
-    def on_tool_selected(self, event=None):
+    def on_tool_selected(self, index=None):
         self.update_camera_metadata()
 
     # ---------------------------------------------------------
     # Size
     # ---------------------------------------------------------
 
-    def on_size_selected(self, event=None):
+    def on_size_selected(self, index=None):
         self.update_camera_metadata()
 
-    def refresh_size_dropdowns(self):
+    def refresh_tools_size_dropdowns(self):
         sizes = ToolSettings.load_sizes_data()
 
-        measurement = self.measurement_var.get()
+        measurement = self.size_dropdown.get()
 
-        available_sizes = sizes.get(
-            measurement,
+        if measurement == "Other":
+            size_1_measurement = "Other"
+            size_2_measurement = "Other"
+
+        elif measurement == "DUAL":
+            size_1_measurement = "SAE"
+            size_2_measurement = "Metric"
+
+        else:
+            size_1_measurement = measurement
+            size_2_measurement = measurement
+
+        size_1_values = sizes.get(
+            size_1_measurement,
             [],
         )
 
-        self.size_dropdown["values"] = (
-            available_sizes
+        size_2_values = sizes.get(
+            size_2_measurement,
+            [],
         )
 
-        self.size_2_dropdown["values"] = (
-            available_sizes
+        self.size_dropdown.set_measurement(
+            size_1_measurement
         )
 
-        if self.size_var.get() not in available_sizes:
-            self.size_var.set("")
+        self.size_2_dropdown.set_measurement(
+            size_2_measurement
+        )
 
-        if self.size_2_var.get() not in available_sizes:
-            self.size_2_var.set("")
+        self.size_dropdown.set_values(
+            size_1_values
+        )
+
+        self.size_2_dropdown.set_values(
+            size_2_values
+        )
 
     # ---------------------------------------------------------
     # Metadata Dropdowns
     # ---------------------------------------------------------
 
-    def on_measurement_selected(self, event=None):
-        self.refresh_size_dropdowns()
+    def on_measurement_selected(self, index=None):
+        self.refresh_tools_size_dropdowns()
         self.update_camera_metadata()
 
-    def on_drive_selected(self, event=None):
+    def on_drive_selected(self, index=None):
         self.update_camera_metadata()
 
-    def on_point_selected(self, event=None):
+    def on_point_selected(self, index=None):
         self.update_camera_metadata()
 
-    def on_specialty_socket_selected(self, event=None):
+    def on_specialty_socket_selected(self, index=None):
         self.update_camera_metadata()
 
     def refresh_metadata_dropdowns(self):
         metadata = MetadataSettings.load_metadata()
 
-        self.measurement_dropdown["values"] = [
+        measurement_values = [
             "SAE",
             "Metric",
+            "Other",
+            "DUAL",
         ]
 
-        self.drive_dropdown["values"] = (
-            metadata.get("drive", [])
+        drive_values = metadata.get(
+            "drive",
+            [],
         )
 
-        self.point_dropdown["values"] = (
-            metadata.get("point", [])
+        point_values = metadata.get(
+            "point",
+            [],
         )
 
-        self.specialty_socket_dropdown[
-            "values"
-        ] = metadata.get(
+        specialty_socket_values = metadata.get(
             "specialty_socket",
             [],
         )
 
-        if self.measurement_var.get() not in (
-            "SAE",
-            "Metric",
-        ):
-            self.measurement_var.set("SAE")
+        self.measurement_dropdown.clear()
+        self.measurement_dropdown.addItems(
+            measurement_values
+        )
+
+        self.drive_dropdown.clear()
+        self.drive_dropdown.addItems(
+            drive_values
+        )
+
+        self.point_dropdown.clear()
+        self.point_dropdown.addItems(
+            point_values
+        )
+
+        self.specialty_socket_dropdown.clear()
+        self.specialty_socket_dropdown.addItems(
+            specialty_socket_values
+        )
 
         if (
-            self.drive_var.get()
-            not in self.drive_dropdown["values"]
+            self.measurement_dropdown.currentText()
+            not in measurement_values
         ):
-            self.drive_var.set("")
+            self.measurement_dropdown.setCurrentText(
+                "SAE"
+            )
 
-        if (
-            self.point_var.get()
-            not in self.point_dropdown["values"]
-        ):
-            self.point_var.set("")
-
-        if (
-            self.specialty_socket_var.get()
-            not in self.specialty_socket_dropdown[
-                "values"
-            ]
-        ):
-            self.specialty_socket_var.set("")
-
-        self.refresh_size_dropdowns()
+        self.refresh_tools_size_dropdowns()
 
     # ---------------------------------------------------------
     # Metadata Text Inputs
     # ---------------------------------------------------------
 
-    def on_invoice_changed(self, event=None):
+    def on_invoice_changed(self, text=None):
         self.update_camera_metadata()
 
-    def on_ebay_id_changed(self, event=None):
+    def on_ebay_id_changed(self, text=None):
         self.update_camera_metadata()
 
-    def on_invoice_price_changed(self, event=None):
+    def on_invoice_price_changed(self, text=None):
         self.update_camera_metadata()
 
-    def on_part_number_changed(self, event=None):
+    def on_part_number_changed(self, text=None):
         self.update_camera_metadata()
 
-    def on_inventory_changed(self, event=None):
+    def on_inventory_changed(self, text=None):
         self.update_camera_metadata()
+
     # ---------------------------------------------------------
     # Main Settings Refresh
     # ---------------------------------------------------------
 
     def refresh_main_settings(self):
         self.tools = ToolSettings.load_tools_data()
-        self.brands = BrandSettings.load_brands()
+        self.brands = ToolSettings.load_brands()
         self.metadata = MetadataSettings.load_metadata()
         self.sizes = ToolSettings.load_sizes_data()
 
         self.tools_changed()
         self.refresh_brand_dropdown()
         self.refresh_metadata_dropdowns()
-        self.refresh_size_dropdowns()
 
     # ---------------------------------------------------------
     # Settings
@@ -224,16 +254,18 @@ class ToolsMixin:
 
     def open_settings(self):
         if self.camera is None:
-            self.status_label.config(
-                text="Camera is still loading..."
+            self.status_label.setText(
+                "Camera is still loading..."
             )
             return
 
         if (
             self.settings_window is not None
-            and self.settings_window.window.winfo_exists()
+            and self.settings_window.is_open()
         ):
-            self.settings_window.window.lift()
+            self.settings_window.window.showNormal()
+            self.settings_window.window.raise_()
+            self.settings_window.window.activateWindow()
             return
 
         self.settings_window = SettingsWindow(
@@ -255,23 +287,19 @@ class ToolsMixin:
             self.tools.keys()
         )
 
-        self.tool_dropdown["values"] = (
+        current_tool = self.tool_dropdown.currentText()
+
+        self.tool_dropdown.clear()
+        self.tool_dropdown.addItems(
             tool_names
         )
 
-        current_tool = self.tool_var.get()
-
-        if current_tool in self.tools:
-            self.tool_dropdown.set(
+        if current_tool in tool_names:
+            self.tool_dropdown.setCurrentText(
                 current_tool
             )
 
         elif tool_names:
-            self.tool_dropdown.set(
-                tool_names[0]
-            )
-
-        else:
-            self.tool_dropdown.set("")
+            self.tool_dropdown.setCurrentIndex(0)
 
         self.update_camera_metadata()
