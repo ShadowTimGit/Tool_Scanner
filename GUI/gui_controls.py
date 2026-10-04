@@ -20,6 +20,7 @@ from PySide6.QtGui import QPainter, QPen
 import cv2
 import json
 import os
+from pathlib import Path
 
 from GUI.gui_constants import (
     CROP_MODE_FULL,
@@ -499,7 +500,6 @@ class ControlsMixin:
         # Require Red
         # --------------------------------------------------------------
 
-        self.require_red_var = False
 
         self.require_red_check = XCheckBox(
             "Require Red Scan"
@@ -518,7 +518,7 @@ class ControlsMixin:
         )
 
         self.require_red_check.toggled.connect(
-            self._require_red_toggled
+            self.on_require_red_changed
         )
 
         self.control_layout.addWidget(
@@ -817,6 +817,15 @@ class ControlsMixin:
         self,
         dropdown,
     ):
+
+        base_dir = Path(__file__).resolve().parent
+
+        arrow_icon = (
+            base_dir
+            / "icons"
+            / "arrow.png"
+        )
+
         dropdown.setStyleSheet(
             f"""
             QComboBox {{
@@ -838,6 +847,13 @@ class ControlsMixin:
             QComboBox::drop-down {{
                 border: none;
                 width: 28px;
+            }}
+
+            QComboBox::down-arrow {{
+                width: 16px;
+                height: 16px;
+                image: url("{arrow_icon.as_posix()}");
+                border: none;
             }}
 
             QComboBox QAbstractItemView {{
@@ -862,7 +878,7 @@ class ControlsMixin:
         button.setStyleSheet(
             f"""
             QPushButton {{
-                color: {self._get_color(INVERTED_TEXT)};
+                color: {self._get_color(WHITE_TEXT)};
                 background: {self._get_color(ACCENT_COLOR)};
                 border: none;
                 border-radius: 8px;
@@ -1177,19 +1193,15 @@ class ControlsMixin:
     # Require red
     # ------------------------------------------------------------------
 
-    def _require_red_toggled(
+    def on_require_red_changed(
         self,
         checked,
     ):
-        self.require_red_var = checked
-        self.on_require_red_changed()
-
-    def on_require_red_changed(self):
         if self.camera is None:
             return
 
         self.camera.set_require_red_for_automatic(
-            self.require_red_var
+            checked
         )
 
     # ------------------------------------------------------------------
@@ -1449,7 +1461,7 @@ class ControlsMixin:
                 width: 18px;
                 height: 18px;
                 border-radius: 4px;
-                border: 1px solid {self._get_color(BORDER_COLOR)};
+                border: 1px solid {self._get_color(ACCENT_COLOR)};
                 background: {self._get_color(INPUT_BG)};
             }}
 
@@ -1579,7 +1591,7 @@ class ControlsMixin:
         button.setStyleSheet(
             f"""
             QPushButton {{
-                color: {self._get_color(INVERTED_TEXT)};
+                color: {self._get_color(WHITE_TEXT)};
                 background: {self._get_color(ACCENT_COLOR)};
                 border: none;
                 border-radius: 8px;

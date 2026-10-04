@@ -1,6 +1,6 @@
 from fractions import Fraction
 
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Qt, QSize
 from PySide6.QtWidgets import (
     QFrame,
     QPushButton,
@@ -9,13 +9,15 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QLabel,
 )
-
+from PySide6.QtGui import QIcon
 from GUI.appearance_controller import (
     INPUT_BG,
     PANEL_BG,
     BORDER_COLOR,
     TEXT_COLOR,
 )
+
+from pathlib import Path
 
 
 class FractionDropdown(QFrame):
@@ -35,6 +37,14 @@ class FractionDropdown(QFrame):
     ):
         super().__init__(parent)
 
+        base_dir = Path(__file__).resolve().parent
+
+        self.arrow_icon = (
+            base_dir
+            / "icons"
+            / "arrow.png"
+        )
+
         # __init__
         self.appearance_mode = appearance_mode
         self.textvariable = textvariable
@@ -53,8 +63,8 @@ class FractionDropdown(QFrame):
         self.setStyleSheet(
             f"""
             QFrame {{
-                background-color: {INPUT_BG[1]};
-                border: 1px solid {BORDER_COLOR[1]};
+                background-color: {INPUT_BG};
+                border: 1px solid {BORDER_COLOR};
                 border-radius: 8px;
             }}
             """
@@ -114,7 +124,7 @@ class FractionDropdown(QFrame):
         self.button.setStyleSheet(
             f"""
             QPushButton {{
-                background-color: {INPUT_BG[1]};
+                background-color: {INPUT_BG};
                 color: {TEXT_COLOR[1]};
                 border: none;
                 border-radius: 7px;
@@ -122,7 +132,7 @@ class FractionDropdown(QFrame):
             }}
 
             QPushButton:hover {{
-                background-color: {BORDER_COLOR[1]};
+                background-color: {BORDER_COLOR};
             }}
             """
         )
@@ -143,8 +153,14 @@ class FractionDropdown(QFrame):
             self.toggle_dropdown
         )
 
-        self.arrow_button = QPushButton(
-            "▼"
+        self.arrow_button = QPushButton()
+
+        self.arrow_button.setIcon(
+            QIcon(str(self.arrow_icon))
+        )
+
+        self.arrow_button.setIconSize(
+            QSize(16, 16)
         )
 
         self.arrow_button.setFixedWidth(
@@ -158,19 +174,17 @@ class FractionDropdown(QFrame):
         self.arrow_button.setStyleSheet(
             f"""
             QPushButton {{
-                background-color: {INPUT_BG[1]};
-                color: {TEXT_COLOR[1]};
+                background-color: {INPUT_BG};
                 border: none;
                 border-radius: 7px;
-                font-size: 10px;
             }}
 
             QPushButton:hover {{
-                background-color: {BORDER_COLOR[1]};
+                background-color: {BORDER_COLOR};
             }}
             """
         )
-
+        
         self.arrow_button.clicked.connect(
             self.toggle_dropdown
         )
@@ -261,15 +275,13 @@ class FractionDropdown(QFrame):
         self.arrow_button.setStyleSheet(
             f"""
             QPushButton {{
-                background-color: {panel_bg};
-                color: {text};
+                background-color: {INPUT_BG};
                 border: none;
                 border-radius: 7px;
-                font-size: 10px;
             }}
 
             QPushButton:hover {{
-                background-color: {border};
+                background-color: {BORDER_COLOR};
             }}
             """
         )

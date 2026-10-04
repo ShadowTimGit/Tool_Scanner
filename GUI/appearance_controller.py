@@ -1,19 +1,23 @@
-from PySide6.QtCore import QObject, Signal, Qt
+from PySide6.QtCore import (
+    QObject,
+    Signal,
+    Qt,
+    QPropertyAnimation,
+    Property,
+)
 from PySide6.QtGui import (
     QPainter,
     QPen,
     QColor,
+    QPixmap,
 )
 from PySide6.QtWidgets import (
     QWidget,
     QHBoxLayout,
     QCheckBox,
 )
+from pathlib import Path
 
-
-# ==================================================================
-# Application Appearance
-# ==================================================================
 
 CONTROL_BG = (
     "#E7E9ED",
@@ -91,18 +95,39 @@ BLACK_TEXT = (
 )
 
 
-# ==================================================================
-# Appearance Toggle
-# ==================================================================
-
 class AppearanceToggle(QCheckBox):
 
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        parent=None,
+    ):
         super().__init__(parent)
 
+        base_dir = Path(__file__).resolve().parent
+
+        sun_icon = (
+            base_dir
+            / "icons"
+            / "sun.png"
+        )
+
+        moon_icon = (
+            base_dir
+            / "icons"
+            / "moon.png"
+        )
+
+        self.sun_icon = QPixmap(
+            str(sun_icon)
+        )
+
+        self.moon_icon = QPixmap(
+            str(moon_icon)
+        )
+
         self.setFixedSize(
-            100,
-            30,
+            72,
+            36,
         )
 
         self.setCursor(
@@ -115,46 +140,123 @@ class AppearanceToggle(QCheckBox):
 
         self.background = CONTROL_BG[1]
         self.border = BORDER_COLOR[1]
-        self.text_color = TEXT_COLOR[1]
+        self.knob_color = "#FFFFFF"
 
-    # --------------------------------------------------------------
-    # Colors
-    # --------------------------------------------------------------
+        self._slider_position = 0.0
+
+        self.animation = QPropertyAnimation(
+            self,
+            b"slider_position",
+        )
+
+        self.animation.setDuration(
+            180
+        )
+
+        self.toggled.connect(
+            self.animate_toggle
+        )
+
+    def get_slider_position(self):
+        return self._slider_position
+
+    def set_slider_position(
+        self,
+        position,
+    ):
+        self._slider_position = position
+        self.update()
+
+    slider_position = Property(
+        float,
+        get_slider_position,
+        set_slider_position,
+    )
 
     def set_colors(
         self,
         background,
         border,
-        text,
+        knob_color,
+        text=None,
     ):
         self.background = background
         self.border = border
-        self.text_color = text
-
+        self.knob_color = knob_color
         self.update()
 
-    # --------------------------------------------------------------
-    # Mouse
-    # --------------------------------------------------------------
-
-    def mousePressEvent(self, event):
-
+    def mousePressEvent(
+        self,
+        event,
+    ):
         if event.button() == Qt.LeftButton:
             self.setChecked(
                 not self.isChecked()
             )
-
             event.accept()
             return
 
-        super().mousePressEvent(event)
+        super().mousePressEvent(
+            event
+        )
 
-    # --------------------------------------------------------------
-    # Paint
-    # --------------------------------------------------------------
+    def animate_toggle(
+        self,
+        checked,
+    ):
+        start = self._slider_position
 
-    def paintEvent(self, event):
+        end = (
+            1.0
+            if checked
+            else 0.0
+        )
 
+        self.animation.stop()
+
+        self.animation.setStartValue(
+            start
+        )
+
+        self.animation.setEndValue(
+            end
+        )
+
+        self.animation.start()
+
+    def set_slider_mode(
+        self,
+        light,
+        animate=False,
+    ):
+        target = (
+            1.0
+            if light
+            else 0.0
+        )
+
+        if not animate:
+            self.animation.stop()
+            self._slider_position = target
+            self.update()
+            return
+
+        self.animation.stop()
+
+        self.animation.setStartValue(
+            self._slider_position
+        )
+
+        self.animation.setEndValue(
+            target
+        )
+
+        self.animation.start()
+
+    def paintEvent(
+        self,
+        event,
+    ):
         painter = QPainter(self)
 
         if not painter.isActive():
@@ -184,39 +286,95 @@ class AppearanceToggle(QCheckBox):
             0,
             self.width() - 1,
             self.height() - 1,
-            15,
-            15,
+            self.height() / 2,
+            self.height() / 2,
         )
 
-        painter.setPen(
-            QColor(
-                self.text_color
+        padding = 3
+
+        knob_size = (
+            self.height()
+            - (
+                padding * 2
             )
         )
 
-        font = painter.font()
-        font.setPointSize(12)
-        font.setBold(True)
-        painter.setFont(font)
+        min_x = padding
 
-        mode = (
-            "Light"
+        max_x = (
+            self.width()
+            - padding
+            - knob_size
+        )
+
+        knob_x = (
+            min_x
+            + (
+                max_x - min_x
+            )
+            * self._slider_position
+        )
+
+        knob_y = padding
+
+        painter.setBrush(
+            QColor(
+                self.knob_color
+            )
+        )
+
+        painter.setPen(
+            Qt.NoPen
+        )
+
+        painter.drawEllipse(
+            int(knob_x),
+            knob_y,
+            knob_size,
+            knob_size,
+        )
+
+        icon = (
+            self.sun_icon
             if self.isChecked()
-            else "Dark"
+            else self.moon_icon
         )
 
-        painter.drawText(
-            self.rect(),
-            Qt.AlignCenter,
-            mode,
-        )
+        if not icon.isNull():
+
+            icon_padding = 7
+
+            icon_rect = icon.scaled(
+                knob_size - icon_padding,
+                knob_size - icon_padding,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+
+            icon_x = int(
+                knob_x
+                + (
+                    knob_size
+                    - icon_rect.width()
+                ) / 2
+            )
+
+            icon_y = int(
+                knob_y
+                + (
+                    knob_size
+                    - icon_rect.height()
+                ) / 2
+            )
+
+            painter.drawPixmap(
+                icon_x,
+                icon_y,
+                icon_rect,
+            )
 
         painter.end()
 
-
-# ==================================================================
-# Appearance Controller
-# ==================================================================
 
 class AppearanceController(QObject):
 
@@ -231,14 +389,10 @@ class AppearanceController(QObject):
 
         self.parent = parent
         self.on_changed = on_changed
-
         self.mode = "Dark"
 
         self.create_gui()
-
-    # --------------------------------------------------------------
-    # Color
-    # --------------------------------------------------------------
+        self.refresh_theme()
 
     @staticmethod
     def get_color(
@@ -257,10 +411,6 @@ class AppearanceController(QObject):
             )
 
         return color
-
-    # --------------------------------------------------------------
-    # GUI
-    # --------------------------------------------------------------
 
     def create_gui(self):
 
@@ -281,10 +431,6 @@ class AppearanceController(QObject):
 
         self.layout.setSpacing(0)
 
-        # ----------------------------------------------------------
-        # Appearance Container
-        # ----------------------------------------------------------
-
         self.container = QWidget(
             self.frame
         )
@@ -302,16 +448,17 @@ class AppearanceController(QObject):
 
         self.container_layout.setSpacing(0)
 
-        # ----------------------------------------------------------
-        # Appearance Toggle
-        # ----------------------------------------------------------
-
         self.switch = AppearanceToggle(
             self.container
         )
 
         self.switch.setChecked(
             False
+        )
+
+        self.switch.set_slider_mode(
+            light=False,
+            animate=False,
         )
 
         self.switch.toggled.connect(
@@ -322,39 +469,31 @@ class AppearanceController(QObject):
             self.switch
         )
 
-        # Add Appearance Container at the top
         self.layout.insertWidget(
             0,
             self.container
         )
 
-    # --------------------------------------------------------------
-    # Theme
-    # --------------------------------------------------------------
-
     def refresh_theme(self):
 
         if self.mode == "Light":
-
-            background = CONTROL_BG[0]
+            background = CONTROL_BG[1]
             border = BORDER_COLOR[0]
             text = TEXT_COLOR[0]
+            knob_color = PANEL_BG[0]
 
         else:
-
-            background = CONTROL_BG[1]
+            background = CONTROL_BG[0]
             border = BORDER_COLOR[1]
             text = TEXT_COLOR[1]
+            knob_color = PANEL_BG[1]
 
         self.switch.set_colors(
             background,
             border,
+            knob_color,
             text,
         )
-
-    # --------------------------------------------------------------
-    # Mode
-    # --------------------------------------------------------------
 
     def toggle_mode(
         self,
@@ -377,10 +516,6 @@ class AppearanceController(QObject):
             self.on_changed(
                 self.mode
             )
-
-    # --------------------------------------------------------------
-    # Set Mode
-    # --------------------------------------------------------------
 
     def set_mode(
         self,
@@ -410,6 +545,11 @@ class AppearanceController(QObject):
             False
         )
 
+        self.switch.set_slider_mode(
+            light=mode == "Light",
+            animate=False,
+        )
+
         self.refresh_theme()
 
         if emit:
@@ -423,10 +563,6 @@ class AppearanceController(QObject):
                 self.on_changed(
                     mode
                 )
-
-    # --------------------------------------------------------------
-    # Get Mode
-    # --------------------------------------------------------------
 
     def get_mode(self):
         return self.mode

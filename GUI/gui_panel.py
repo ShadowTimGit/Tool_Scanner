@@ -59,12 +59,12 @@ from GUI.appearance_controller import (
 from tool_logger.workbook import (
     remove_row_from_workbook_by_path,
 )
-
+from pathlib import Path
 
 class NoWheelListView(QListView):
 
     def wheelEvent(self, event):
-        event.accept()
+        super().wheelEvent(event)
 
 
 class NoWheelComboBox(QComboBox):
@@ -76,8 +76,6 @@ class NoWheelComboBox(QComboBox):
             NoWheelListView()
         )
 
-        self._wheel_block_widgets = set()
-
     def wheelEvent(self, event):
         # Closed combo box:
         # allow the parent panel to receive the wheel.
@@ -86,41 +84,7 @@ class NoWheelComboBox(QComboBox):
     def showPopup(self):
         super().showPopup()
 
-        view = self.view()
-
-        if view is None:
-            return
-
-        popup = view.window()
-        viewport = view.viewport()
-
-        # The wheel can be delivered to any of these.
-        for widget in (
-            popup,
-            view,
-            viewport,
-        ):
-            if widget is not None:
-                widget.installEventFilter(self)
-                self._wheel_block_widgets.add(
-                    widget
-                )
-
     def hidePopup(self):
-
-        for widget in list(
-            self._wheel_block_widgets
-        ):
-
-            try:
-                widget.removeEventFilter(
-                    self
-                )
-            except RuntimeError:
-                pass
-
-        self._wheel_block_widgets.clear()
-
         super().hidePopup()
 
     def eventFilter(
@@ -128,12 +92,6 @@ class NoWheelComboBox(QComboBox):
         watched,
         event,
     ):
-
-        if event.type() == QEvent.Wheel:
-
-            if watched in self._wheel_block_widgets:
-                event.accept()
-                return True
 
         return super().eventFilter(
             watched,
@@ -249,6 +207,14 @@ class RightPanelMixin:
         widget,
     ):
 
+        base_dir = Path(__file__).resolve().parent
+
+        arrow_icon = (
+            base_dir
+            / "icons"
+            / "arrow.png"
+        )
+
         widget.setStyleSheet(
             f"""
             QLineEdit,
@@ -267,8 +233,16 @@ class RightPanelMixin:
             }}
 
             QComboBox::drop-down {{
+                background-color: {self.get_color(INPUT_BG)};
                 border: none;
                 width: 28px;
+            }}
+
+            QComboBox::down-arrow {{
+                width: 16px;
+                height: 16px;
+                image: url("{arrow_icon.as_posix()}");
+                border: none;
             }}
 
             QComboBox QAbstractItemView {{
@@ -277,6 +251,36 @@ class RightPanelMixin:
                 border: 1px solid {self.get_color(BORDER_COLOR)};
                 selection-background-color: {self.get_color(ACCENT_COLOR)};
                 selection-color: {self.get_color(WHITE_TEXT)};
+            }}
+
+            QComboBox QAbstractItemView QScrollBar:vertical {{
+                background: {self.get_color(PANEL_BG)};
+                width: 10px;
+                margin: 0px;
+                border: none;
+            }}
+
+            QComboBox QAbstractItemView QScrollBar::handle:vertical {{
+                background: #183A66;
+                border: none;
+                border-radius: 5px;
+                min-height: 30px;
+            }}
+
+            QComboBox QAbstractItemView QScrollBar::handle:vertical:hover {{
+                background: #24558F;
+            }}
+
+            QComboBox QAbstractItemView QScrollBar::add-line:vertical,
+            QComboBox QAbstractItemView QScrollBar::sub-line:vertical {{
+                height: 0px;
+                border: none;
+                background: transparent;
+            }}
+
+            QComboBox QAbstractItemView QScrollBar::add-page:vertical,
+            QComboBox QAbstractItemView QScrollBar::sub-page:vertical {{
+                background: transparent;
             }}
             """
         )

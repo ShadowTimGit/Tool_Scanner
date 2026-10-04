@@ -37,7 +37,10 @@ from settings_menu.settings_config import (
 # SETTINGS PATHS
 # =========================================================
 
-SETTINGS_DIR = "settings"
+SETTINGS_DIR = os.path.join(
+    "settings_menu",
+    "settings",
+)
 
 METADATA_FILE = os.path.join(
     SETTINGS_DIR,

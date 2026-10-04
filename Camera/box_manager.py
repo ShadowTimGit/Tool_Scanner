@@ -224,6 +224,65 @@ class BoxManager:
             self.resizing = False
             self.resize_handle = None
 
+    def _update_mouse_cursor(
+        self,
+        x,
+        y,
+    ):
+        """
+        Update the OpenCV window cursor based on
+        whether the mouse is over a resize handle.
+        """
+
+        box = None
+
+        if (
+            self.show_scan_box
+            and self.scan_box is not None
+            and self.point_inside_box(
+                self.scan_box,
+                x,
+                y,
+            )
+        ):
+            box = self.scan_box
+
+        elif (
+            self.show_crop_box
+            and self.crop_box is not None
+            and self.point_inside_box(
+                self.crop_box,
+                x,
+                y,
+            )
+        ):
+            box = self.crop_box
+
+        elif (
+            self.show_counting_box
+            and self.counting_box is not None
+            and self.point_inside_box(
+                self.counting_box,
+                x,
+                y,
+            )
+        ):
+            box = self.counting_box
+
+        if box is None:
+            return
+
+        handle = self.get_resize_handle(
+            box,
+            x,
+            y,
+        )
+
+        if handle is None:
+            return
+
+
+
     # ==================================================
     # Mouse Callback
     # ==================================================
@@ -417,28 +476,64 @@ class BoxManager:
         # Mouse movement
         # -------------------------
 
-        if (
-            event
-            == cv2.EVENT_MOUSEMOVE
-        ):
+        if event == cv2.EVENT_MOUSEMOVE:
+
+            # -------------------------
+            # Update resize cursor state
+            # -------------------------
+
+            if not self.dragging and not self.resizing:
+
+                hovered_handle = None
+
+                if (
+                    self.show_scan_box
+                    and self.scan_box is not None
+                ):
+                    hovered_handle = self.get_resize_handle(
+                        self.scan_box,
+                        x,
+                        y,
+                    )
+
+                if (
+                    hovered_handle is None
+                    and self.show_crop_box
+                    and self.crop_box is not None
+                ):
+                    hovered_handle = self.get_resize_handle(
+                        self.crop_box,
+                        x,
+                        y,
+                    )
+
+                if (
+                    hovered_handle is None
+                    and self.show_counting_box
+                    and self.counting_box is not None
+                ):
+                    hovered_handle = self.get_resize_handle(
+                        self.counting_box,
+                        x,
+                        y,
+                    )
+
+                # Store the hovered handle so the UI can use it
+                self.resize_handle = hovered_handle
+
+                return
 
             if self.active_box is None:
                 return
 
-            if (
-                not self.dragging
-                and not self.resizing
-            ):
+            if not self.dragging and not self.resizing:
                 return
 
             # -------------------------
             # Determine active box
             # -------------------------
 
-            if (
-                self.active_box
-                == "scan"
-            ):
+            if self.active_box == "scan":
 
                 if (
                     not self.show_scan_box
@@ -452,10 +547,7 @@ class BoxManager:
 
                 box = self.scan_box
 
-            elif (
-                self.active_box
-                == "crop"
-            ):
+            elif self.active_box == "crop":
 
                 if (
                     not self.show_crop_box
@@ -469,10 +561,7 @@ class BoxManager:
 
                 box = self.crop_box
 
-            elif (
-                self.active_box
-                == "counting"
-            ):
+            elif self.active_box == "counting":
 
                 if (
                     not self.show_counting_box
@@ -487,7 +576,6 @@ class BoxManager:
                 box = self.counting_box
 
             else:
-
                 return
 
             # -------------------------
@@ -498,94 +586,59 @@ class BoxManager:
 
                 new_box = list(box)
 
-                if (
-                    self.resize_handle
-                    is None
-                ):
+                if self.resize_handle is None:
                     return
 
-                if (
-                    "left"
-                    in self.resize_handle
-                ):
+                if "left" in self.resize_handle:
 
                     new_box[0] = min(
                         x,
-                        new_box[2]
-                        - MIN_BOX_WIDTH,
+                        new_box[2] - MIN_BOX_WIDTH,
                     )
 
-                if (
-                    "right"
-                    in self.resize_handle
-                ):
+                if "right" in self.resize_handle:
 
                     new_box[2] = max(
                         x,
-                        new_box[0]
-                        + MIN_BOX_WIDTH,
+                        new_box[0] + MIN_BOX_WIDTH,
                     )
 
-                if (
-                    "top"
-                    in self.resize_handle
-                ):
+                if "top" in self.resize_handle:
 
                     new_box[1] = min(
                         y,
-                        new_box[3]
-                        - MIN_BOX_HEIGHT,
+                        new_box[3] - MIN_BOX_HEIGHT,
                     )
 
-                if (
-                    "bottom"
-                    in self.resize_handle
-                ):
+                if "bottom" in self.resize_handle:
 
                     new_box[3] = max(
                         y,
-                        new_box[1]
-                        + MIN_BOX_HEIGHT,
+                        new_box[1] + MIN_BOX_HEIGHT,
                     )
 
                 if self.current_frame_shape is None:
                     return
 
-                height, width = (
-                    self.current_frame_shape
-                )
+                height, width = self.current_frame_shape
 
-                new_box = (
-                    self.settings.clamp_box(
-                        new_box,
-                        width,
-                        height,
-                    )
+                new_box = self.settings.clamp_box(
+                    new_box,
+                    width,
+                    height,
                 )
 
                 # -------------------------
                 # Save resized box
                 # -------------------------
 
-                if (
-                    self.active_box
-                    == "scan"
-                ):
-
+                if self.active_box == "scan":
                     self.scan_box = new_box
 
-                elif (
-                    self.active_box
-                    == "crop"
-                ):
-
+                elif self.active_box == "crop":
                     self.crop_box = new_box
 
-                elif (
-                    self.active_box
-                    == "counting"
-                ):
-
+                elif self.active_box == "counting":
                     self.counting_box = new_box
 
             # -------------------------
@@ -594,23 +647,11 @@ class BoxManager:
 
             elif self.dragging:
 
-                box_width = (
-                    box[2] - box[0]
-                )
+                box_width = box[2] - box[0]
+                box_height = box[3] - box[1]
 
-                box_height = (
-                    box[3] - box[1]
-                )
-
-                new_x1 = (
-                    x
-                    - self.drag_offset_x
-                )
-
-                new_y1 = (
-                    y
-                    - self.drag_offset_y
-                )
+                new_x1 = x - self.drag_offset_x
+                new_y1 = y - self.drag_offset_y
 
                 new_box = [
                     new_x1,
@@ -622,41 +663,25 @@ class BoxManager:
                 if self.current_frame_shape is None:
                     return
 
-                height, width = (
-                    self.current_frame_shape
-                )
+                height, width = self.current_frame_shape
 
-                new_box = (
-                    self.settings.clamp_box(
-                        new_box,
-                        width,
-                        height,
-                    )
+                new_box = self.settings.clamp_box(
+                    new_box,
+                    width,
+                    height,
                 )
 
                 # -------------------------
                 # Save moved box
                 # -------------------------
 
-                if (
-                    self.active_box
-                    == "scan"
-                ):
-
+                if self.active_box == "scan":
                     self.scan_box = new_box
 
-                elif (
-                    self.active_box
-                    == "crop"
-                ):
-
+                elif self.active_box == "crop":
                     self.crop_box = new_box
 
-                elif (
-                    self.active_box
-                    == "counting"
-                ):
-
+                elif self.active_box == "counting":
                     self.counting_box = new_box
 
 

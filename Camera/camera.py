@@ -74,10 +74,15 @@ TRIGGER_MANUAL = "Manual"
 TRIGGER_AUTOMATIC = "Automatic"
 TRIGGER_CONTINUOUS = "Continuous Counting"
 
-REQUIRE_RED_FOR_AUTOMATIC = True
-
 WINDOW_NAME = "Camera"
 
+
+# ==================================================
+# Debug Settings
+# ==================================================
+
+DEBUG_AUTO_CAPTURE = False
+DEBUG_CAMERA = False
 
 INVENTORY_SETTINGS_PATH = os.path.join(
     os.path.dirname(__file__),
@@ -195,9 +200,7 @@ class CameraProcessor:
         self.trigger_mode = TRIGGER_AUTOMATIC
         self.crop_mode = CROP_MODE_PREVIEW
 
-        self.require_red_for_automatic = (
-            REQUIRE_RED_FOR_AUTOMATIC
-        )
+        self.require_red_for_automatic = False
 
         self.processed_object_ids = set()
         self.counting_object_ids = set()
@@ -1566,37 +1569,92 @@ class CameraProcessor:
         red_detected,
         current_time,
     ):
-
-        if not object_entered:
-            return False
-
-        if obj["frames"] < MIN_FRAMES:
-            return False
-
-        if not center_inside:
-            return False
-
-        if not red_detected:
-            return False
-
-        if (
-            object_id
-            in self.processed_object_ids
-        ):
-            return False
-
         time_since_capture = (
-            current_time
-            - self.last_capture_time
+            current_time - self.last_capture_time
         )
 
-        if (
-            time_since_capture
-            < CAPTURE_INTERVAL
+        reason = None
+
+        if not object_entered:
+            reason = "object has not entered counting box"
+
+        # elif obj["frames"] < MIN_FRAMES:
+        #     reason = (
+        #         f"not enough frames "
+        #         f"({obj['frames']}/{MIN_FRAMES})"
+        #     )
+
+        elif not center_inside:
+            reason = "object center outside counting box"
+
+        elif (
+            self.require_red_for_automatic
+            and not red_detected
         ):
+            reason = "red scan not detected"
+
+        elif object_id in self.processed_object_ids:
+            reason = "object already processed"
+
+        elif time_since_capture < CAPTURE_INTERVAL:
+            reason = (
+                f"capture interval not elapsed "
+                f"({time_since_capture:.2f}s/{CAPTURE_INTERVAL}s)"
+            )
+
+        # Only print when the rejection reason changes.
+        previous_reason = getattr(
+            self,
+            "_auto_debug_reasons",
+            {},
+        ).get(object_id)
+
+        if reason:
+
+            if (
+                DEBUG_AUTO_CAPTURE
+                and previous_reason != reason
+            ):
+                print(
+                    f"[AUTO DEBUG] ID={object_id}: "
+                    f"REJECT - {reason}"
+                )
+
+            if not hasattr(
+                self,
+                "_auto_debug_reasons",
+            ):
+                self._auto_debug_reasons = {}
+
+            self._auto_debug_reasons[
+                object_id
+            ] = reason
+
             return False
 
+        # Conditions passed.
+        if not hasattr(
+            self,
+            "_auto_debug_reasons",
+        ):
+            self._auto_debug_reasons = {}
+
+        if (
+            DEBUG_AUTO_CAPTURE
+            and previous_reason != "READY"
+        ):
+            print(
+                f"[AUTO DEBUG] ID={object_id}: "
+                f"READY - all automatic capture "
+                f"conditions passed"
+            )
+
+        self._auto_debug_reasons[
+            object_id
+        ] = "READY"
+
         return True
+
 
     def _handle_automatic_capture(
         self,
@@ -1609,7 +1667,6 @@ class CameraProcessor:
         red_detected,
         current_time,
     ):
-
         if not self._should_automatic_capture(
             object_id=object_id,
             obj=obj,
@@ -1620,7 +1677,20 @@ class CameraProcessor:
         ):
             return
 
+        if DEBUG_AUTO_CAPTURE:
+            print(
+                f"[AUTO DEBUG] "
+                f"CAPTURE TRIGGERED for ID={object_id}"
+            )
+
         if self.metadata_sync_callback:
+
+            if DEBUG_AUTO_CAPTURE:
+                print(
+                    f"[AUTO DEBUG] "
+                    f"Running metadata sync "
+                    f"for ID={object_id}"
+                )
 
             self.metadata_sync_callback()
 
@@ -1633,7 +1703,23 @@ class CameraProcessor:
         )
 
         if not saved_filename:
+
+            if DEBUG_AUTO_CAPTURE:
+                print(
+                    f"[AUTO DEBUG] "
+                    f"CAPTURE FAILED for ID={object_id}: "
+                    f"capture_counting_area() "
+                    f"returned None."
+                )
+
             return
+
+        if DEBUG_AUTO_CAPTURE:
+            print(
+                f"[AUTO DEBUG] "
+                f"CAPTURE SUCCESS for ID={object_id}: "
+                f"{saved_filename}"
+            )
 
         self.processed_object_ids.add(
             object_id
@@ -2615,23 +2701,25 @@ class CameraProcessor:
             != self.camera_height
         ):
 
-            print(
-                f"Warning: requested camera "
-                f"resolution "
-                f"{self.camera_width}x"
-                f"{self.camera_height}, "
-                f"but camera is using "
-                f"{actual_width}x"
-                f"{actual_height}"
-            )
+            if DEBUG_CAMERA:
+                print(
+                    f"Warning: requested camera "
+                    f"resolution "
+                    f"{self.camera_width}x"
+                    f"{self.camera_height}, "
+                    f"but camera is using "
+                    f"{actual_width}x"
+                    f"{actual_height}"
+                )
 
         else:
 
-            print(
-                f"Camera resolution: "
-                f"{actual_width}x"
-                f"{actual_height}"
-            )
+            if DEBUG_CAMERA:
+                print(
+                    f"Camera resolution: "
+                    f"{actual_width}x"
+                    f"{actual_height}"
+                )
 
     # ==================================================
     # Set Camera Resolution
@@ -2782,16 +2870,17 @@ class CameraProcessor:
                 )
             )
 
-            print()
-            print(
-                "================================"
-            )
-            print(
-                "TESTING CAMERA RESOLUTIONS"
-            )
-            print(
-                "================================"
-            )
+            if DEBUG_CAMERA:
+                print()
+                print(
+                    "================================"
+                )
+                print(
+                    "TESTING CAMERA RESOLUTIONS"
+                )
+                print(
+                    "================================"
+                )
 
             for (
                 width,
@@ -2832,20 +2921,22 @@ class CameraProcessor:
                         )
                     )
 
-                    print(
-                        f"SUPPORTED: "
-                        f"{width}x{height}"
-                    )
+                    if DEBUG_CAMERA:
+                        print(
+                            f"SUPPORTED: "
+                            f"{width}x{height}"
+                        )
 
                 else:
 
-                    print(
-                        f"NOT SUPPORTED: "
-                        f"{width}x{height}"
-                        f" -> "
-                        f"{actual_width}x"
-                        f"{actual_height}"
-                    )
+                    if DEBUG_CAMERA:
+                        print(
+                            f"NOT SUPPORTED: "
+                            f"{width}x{height}"
+                            f" -> "
+                            f"{actual_width}x"
+                            f"{actual_height}"
+                        )
 
             self.cap.set(
                 cv2.CAP_PROP_FRAME_WIDTH,
@@ -2857,19 +2948,20 @@ class CameraProcessor:
                 current_height,
             )
 
-        print(
-            "================================"
-        )
+        if DEBUG_CAMERA:
+            print(
+                "================================"
+            )
 
-        print(
-            f"Found {len(supported)} "
-            f"supported resolutions."
-        )
+            print(
+                f"Found {len(supported)} "
+                f"supported resolutions."
+            )
 
-        print(
-            "================================"
-        )
+            print(
+                "================================"
+            )
 
-        print()
+            print()
 
         return supported
