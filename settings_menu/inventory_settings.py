@@ -479,7 +479,7 @@ class InventorySettings(QWidget):
         )
 
         self.update_button.setFixedSize(
-            120,
+            100,
             38,
         )
 
@@ -573,7 +573,7 @@ class InventorySettings(QWidget):
 
         self.values_scroll_widget = QWidget()
 
-        self.values_scroll_layout = QVBoxLayout(
+        self.values_scroll_layout = QGridLayout(
             self.values_scroll_widget
         )
 
@@ -584,11 +584,24 @@ class InventorySettings(QWidget):
             0,
         )
 
-        self.values_scroll_layout.setSpacing(
-            BUTTON_LIST_SPACING
+        self.values_scroll_layout.setHorizontalSpacing(0)
+        self.values_scroll_layout.setVerticalSpacing(0)
+
+        for column in range(4):
+            self.values_scroll_layout.setColumnStretch(
+                column,
+                1,
+            )
+
+        self.values_scroll_layout.setColumnStretch(
+            0,
+            1,
         )
 
-        self.values_scroll_layout.addStretch()
+        self.values_scroll_layout.setColumnStretch(
+            1,
+            1,
+        )
 
         self.values_scroll_area.setWidget(
             self.values_scroll_widget
@@ -636,6 +649,34 @@ class InventorySettings(QWidget):
     # =========================================================
     # Styles
     # =========================================================
+
+    def get_value_cell_style(
+        self,
+        selected=False,
+    ):
+        background = (
+            ACCENT_COLOR
+            if selected
+            else INPUT_BG
+        )
+
+        text = (
+            WHITE_TEXT
+            if selected
+            else TEXT_COLOR
+        )
+
+        border = BORDER_COLOR
+
+        return f"""
+        QLabel {{
+            background-color: {self.get_color(background)};
+            color: {self.get_color(text)};
+            border: 1px solid {self.get_color(border)};
+            padding: 0 10px;
+            font-size: 11px;
+        }}
+        """
 
     def get_color(self, color):
         return (
@@ -758,8 +799,8 @@ class InventorySettings(QWidget):
         QPushButton {{
             background-color: {self.get_color(background)};
             color: {self.get_color(text)};
-            border: none;
-            border-radius: 5px;
+            border: 1px solid {self.get_color(BORDER_COLOR)};
+            border-radius: 0px;
             padding-left: 10px;
             text-align: left;
             font-size: 11px;
@@ -1067,15 +1108,8 @@ class InventorySettings(QWidget):
         ):
             return
 
-        while (
-            self.values_scroll_layout.count()
-            > 1
-        ):
-            item = (
-                self.values_scroll_layout.takeAt(
-                    0
-                )
-            )
+        while self.values_scroll_layout.count():
+            item = self.values_scroll_layout.takeAt(0)
 
             widget = item.widget()
 
@@ -1084,67 +1118,108 @@ class InventorySettings(QWidget):
 
         self._value_buttons.clear()
 
-        for tool, value in sorted(
+        values = sorted(
             self.inventory[
                 "estimated_values"
             ].items(),
             key=lambda item: item[0].casefold(),
-        ):
+        )
+
+        for index, (tool, value) in enumerate(values):
+            row = index // 2
+            pair_column = (index % 2) * 2
+
             selected = (
                 tool == self.selected_tool
             )
 
-            button = QPushButton(
-                f"{tool} = ${value:.2f}"
+            tool_button = QPushButton(
+                tool
             )
 
-            button.setFixedHeight(
+            tool_button.setFixedHeight(
                 34
             )
 
-            button.setSizePolicy(
+            tool_button.setSizePolicy(
                 QSizePolicy.Expanding,
                 QSizePolicy.Fixed,
             )
 
-            button.setCursor(
+            tool_button.setCursor(
                 Qt.PointingHandCursor
             )
 
-            button.setStyleSheet(
+            tool_button.setStyleSheet(
                 self.get_value_button_style(
                     selected
                 )
             )
 
-            button.clicked.connect(
+            tool_button.clicked.connect(
                 lambda checked=False,
                 name=tool:
                 self.on_value_selected(name)
             )
 
-            self.values_scroll_layout.insertWidget(
-                self.values_scroll_layout.count() - 1,
-                button,
+            value_label = QLabel(
+                f"${value:.2f}"
+            )
+
+            value_label.setFixedHeight(
+                34
+            )
+
+            value_label.setAlignment(
+                Qt.AlignVCenter | Qt.AlignRight
+            )
+
+            value_label.setStyleSheet(
+                self.get_value_cell_style(
+                    selected
+                )
+            )
+
+            self.values_scroll_layout.addWidget(
+                tool_button,
+                row,
+                pair_column,
+            )
+
+            self.values_scroll_layout.addWidget(
+                value_label,
+                row,
+                pair_column + 1,
             )
 
             self._value_buttons[
                 tool
-            ] = button
+            ] = (
+                tool_button,
+                value_label,
+            )
 
         self._update_selected_value_button()
 
     def _update_selected_value_button(self):
-        for tool, button in (
+        for tool, widgets in (
             self._value_buttons.items()
         ):
             selected = (
                 tool == self.selected_tool
             )
 
+            tool_button, value_label = widgets
+
             try:
-                button.setStyleSheet(
+                tool_button.setStyleSheet(
                     self.get_value_button_style(
+                        selected
+                    )
+                )
+
+                value_label.setStyleSheet(
+                    self.get_value_cell_style(
                         selected
                     )
                 )

@@ -70,7 +70,7 @@ CONTROL_TOP_GAP = 5
 
 INPUT_HEIGHT = 30
 BUTTON_HEIGHT = 30
-BUTTON_WIDTH = 65
+BUTTON_WIDTH = 72
 BUTTON_GAP = 3
 
 DROPDOWN_HEIGHT = 30
@@ -715,9 +715,7 @@ class MetadataSettings(QWidget):
                 )
 
             if self.on_metadata_changed:
-                self.on_metadata_changed(
-                    self.metadata
-                )
+                self.on_metadata_changed()
 
         except OSError:
             pass
@@ -1001,6 +999,7 @@ class MetadataSettings(QWidget):
             0,
         )
 
+
         controls = QWidget()
 
         controls_layout = QGridLayout(
@@ -1009,12 +1008,16 @@ class MetadataSettings(QWidget):
 
         controls_layout.setContentsMargins(
             0,
-            CONTROL_TOP_GAP,
+            CARD_PADDING,
             0,
             0,
         )
 
         controls_layout.setHorizontalSpacing(
+            BUTTON_GAP
+        )
+
+        controls_layout.setVerticalSpacing(
             BUTTON_GAP
         )
 
@@ -1027,7 +1030,7 @@ class MetadataSettings(QWidget):
 
         controls_layout.addWidget(
             self.size_entry,
-            0,
+            1,
             0,
         )
 
@@ -1041,7 +1044,7 @@ class MetadataSettings(QWidget):
 
         controls_layout.addWidget(
             add_button,
-            0,
+            1,
             1,
         )
 
@@ -1056,7 +1059,7 @@ class MetadataSettings(QWidget):
         controls_layout.addWidget(
             remove_button,
             0,
-            2,
+            1,
         )
 
         layout.addWidget(
@@ -1188,7 +1191,7 @@ class MetadataSettings(QWidget):
 
         controls_layout.addWidget(
             self.point_entry,
-            0,
+            1,
             0,
         )
 
@@ -1202,7 +1205,7 @@ class MetadataSettings(QWidget):
 
         controls_layout.addWidget(
             add_button,
-            0,
+            1,
             1,
         )
 
@@ -1216,7 +1219,7 @@ class MetadataSettings(QWidget):
 
         controls_layout.addWidget(
             remove_button,
-            1,
+            0,
             1,
         )
 
@@ -1302,7 +1305,7 @@ class MetadataSettings(QWidget):
 
         controls_layout.addWidget(
             self.drive_entry,
-            0,
+            1,
             0,
         )
 
@@ -1316,7 +1319,7 @@ class MetadataSettings(QWidget):
 
         controls_layout.addWidget(
             add_button,
-            0,
+            1,
             1,
         )
 
@@ -1330,7 +1333,7 @@ class MetadataSettings(QWidget):
 
         controls_layout.addWidget(
             remove_button,
-            1,
+            0,
             1,
         )
 
