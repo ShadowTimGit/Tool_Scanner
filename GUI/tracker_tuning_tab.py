@@ -116,6 +116,7 @@ class TrackerTuningTabMixin:
     )
 
     DEFAULT_TRACKER_SETTINGS = {
+        "tracker_type": "bytetrack",
         "track_high_thresh": 0.60,
         "track_low_thresh": 0.10,
         "new_track_thresh": 0.50,
@@ -879,12 +880,19 @@ class TrackerTuningTabMixin:
         )
 
         settings = dict(
+            self.DEFAULT_TRACKER_SETTINGS
+        )
+
+        settings.update(
             default_settings
         )
 
         settings.update(
             current_settings
         )
+
+        # tracker_type must always exist
+        settings["tracker_type"] = "bytetrack"
 
         return settings
 
@@ -919,6 +927,7 @@ class TrackerTuningTabMixin:
                 return settings
 
             for name in (
+                "tracker_type",
                 "track_high_thresh",
                 "track_low_thresh",
                 "new_track_thresh",
@@ -1102,12 +1111,18 @@ class TrackerTuningTabMixin:
 
         if not tracker_path.exists():
 
-            default_settings = self._load_tracker_yaml(
+            default_settings = dict(
+                self.DEFAULT_TRACKER_SETTINGS
+            )
+
+            loaded_defaults = self._load_tracker_yaml(
                 default_path
             )
 
-            if not default_settings:
-                return
+            if loaded_defaults:
+                default_settings.update(
+                    loaded_defaults
+                )
 
             try:
 
@@ -1133,7 +1148,6 @@ class TrackerTuningTabMixin:
                     "[TrackerTuning] "
                     f"Could not create tracker YAML: {error}"
                 )
-
     # =========================================================
     # Save YAML
     # =========================================================
@@ -1168,6 +1182,8 @@ class TrackerTuningTabMixin:
                     dict,
                 ):
                     existing = data
+
+            self._tracker_settings["tracker_type"] = "bytetrack"
 
             for name, value in (
                 self._tracker_settings.items()
@@ -1242,6 +1258,8 @@ class TrackerTuningTabMixin:
                     dict,
                 ):
                     existing = data
+
+            self._tracker_settings["tracker_type"] = "bytetrack"
 
             for name, value in (
                 self._tracker_settings.items()

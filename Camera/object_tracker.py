@@ -95,6 +95,7 @@ class ObjectTracker:
         # -------------------------
 
         self.tracker_settings = {
+            "tracker_type": "bytetrack",
             "track_high_thresh": 0.60,
             "track_low_thresh": 0.10,
             "new_track_thresh": 0.50,
@@ -151,6 +152,9 @@ class ObjectTracker:
             return
 
         self.tracker_settings[name] = value
+
+        if name == "tracker_type":
+            return
 
         # Apply to the currently active ByteTrack instance.
         predictor = getattr(
@@ -221,6 +225,10 @@ class ObjectTracker:
 
             if args is not None:
                 for name, value in self.tracker_settings.items():
+
+                    if name == "tracker_type":
+                        continue
+
                     setattr(
                         args,
                         name,
