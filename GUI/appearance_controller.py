@@ -477,7 +477,7 @@ class AppearanceController(QObject):
     def refresh_theme(self):
 
         if self.mode == "Light":
-            background = CONTROL_BG[1]
+            background = PANEL_BG[1]
             border = BORDER_COLOR[0]
             text = TEXT_COLOR[0]
             knob_color = PANEL_BG[0]

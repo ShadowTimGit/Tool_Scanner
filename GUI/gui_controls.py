@@ -240,7 +240,7 @@ class ControlsMixin:
             4,
         )
 
-        self.below_webcam_layout.setSpacing(5)
+        self.below_webcam_layout.setSpacing(2)
 
         # --------------------------------------------------------------
         # Add to main application layout
@@ -330,7 +330,7 @@ class ControlsMixin:
             0,
         )
 
-        self.below_webcam_content_layout.setSpacing(5)
+        self.below_webcam_content_layout.setSpacing(2)
 
         self.below_webcam_scroll.setWidget(
             self.below_webcam_frame
@@ -475,7 +475,7 @@ class ControlsMixin:
             8,
         )
 
-        self.control_layout.setSpacing(8)
+        self.control_layout.setSpacing(2)
 
         self.control_scroll.setWidget(
             self.control_content
@@ -799,6 +799,15 @@ class ControlsMixin:
         size=None,
         list=False,
     ):
+        label.setFixedHeight(36)
+
+        label.setSizePolicy(
+            QSizePolicy.Fixed,
+            QSizePolicy.Fixed,
+        )
+
+        label.adjustSize()
+
         label.setStyleSheet(
             f"""
             QLabel {{
@@ -1352,6 +1361,31 @@ class ControlsMixin:
     # ------------------------------------------------------------------
 
     def create_count_display(self):
+        self.count_frame = QFrame(
+            self.below_webcam_frame
+        )
+
+        self.count_frame.setStyleSheet(
+            f"""
+            QFrame {{
+                background: transparent;
+            }}
+            """
+        )
+
+        layout = QHBoxLayout(
+            self.count_frame
+        )
+
+        layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
+        )
+
+        layout.setSpacing(0)
+
         self.count_label = QLabel(
             "Crops: 0"
         )
@@ -1376,10 +1410,27 @@ class ControlsMixin:
             """
         )
 
+        layout.addWidget(
+            self.count_label
+        )
+
+        layout.addStretch()
+
+        layout.addWidget(
+            self.appearance_controller.frame
+        )
+
+        # Move the existing appearance controller into this row.
+        if hasattr(self, "appearance_controller"):
+            layout.addWidget(
+                self.appearance_controller.frame
+            )
+
         self._add_below_webcam_widget(
-            self.count_label,
+            self.count_frame,
             self.BELOW_WEBCAM_ORDER["count_label"],
         )
+        
     # ------------------------------------------------------------------
     # Box display controls
     # ------------------------------------------------------------------

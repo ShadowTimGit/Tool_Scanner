@@ -66,16 +66,17 @@ class ToolSettings(QWidget):
     )
 
     DEFAULT_BRANDS = {
-        "Snap-on": ["Snap-on"],
-        "MAC": ["MAC"],
-        "Matco": ["Matco"],
+        "Blue Point": ["Blue Point"],
         "Cornwell": ["Cornwell"],
         "Craftsman": ["Craftsman"],
         "GearWrench": ["GearWrench"],
-        "SK Tools": ["SK Tools"],
-        "Proto": ["Proto"],
-        "Kobalt": ["Kobalt"],
         "Husky": ["Husky"],
+        "Kobalt": ["Kobalt"],
+        "MAC": ["MAC"],
+        "Matco": ["Matco"],
+        "Proto": ["Proto"],
+        "SK Tools": ["SK Tools"],
+        "Snap-on": ["Snap-on"],
     }
 
     # =========================================================

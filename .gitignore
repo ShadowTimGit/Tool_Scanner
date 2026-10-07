@@ -22,3 +22,6 @@ DEPRECATED/
 
 yolo11n.pt
 yolo11s.pt
+
+Camera/bytetrack_tools.yaml
+Camera/bytetrack_yaml_default.yaml

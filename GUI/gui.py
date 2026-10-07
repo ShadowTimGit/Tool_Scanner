@@ -61,7 +61,7 @@ class ToolScannerGUI(
     RightPanelMixin,
     QMainWindow,
 ):
-
+    finish_remove_recent_crop = Signal(object, object)
     camera_initialized_signal = Signal(object)
     camera_initialization_failed_signal = Signal(object)
     recent_crops_changed_signal = Signal()
@@ -71,6 +71,10 @@ class ToolScannerGUI(
 
         self.recent_crops_changed_signal.connect(
             self._refresh_recent_crops_from_camera
+        )
+
+        self.finish_remove_recent_crop.connect(
+            self._finish_remove_recent_crop
         )
 
         self.root = self
@@ -346,13 +350,8 @@ class ToolScannerGUI(
             on_changed=self.on_appearance_changed,
         )
 
-        self.below_webcam_layout.addWidget(
-            self.appearance_controller.frame,
-            0,
-            Qt.AlignCenter,
-        )
-
         self.create_count_display()
+        
         self.create_status_display()
         self.create_action_buttons()
 
@@ -531,11 +530,7 @@ class ToolScannerGUI(
         ):
             self.refresh_video_theme()
 
-        if hasattr(
-            self,
-            "refresh_tools_theme",
-        ):
-            self.refresh_tools_theme()
+
 
     # ======================================================================
     # Inventory

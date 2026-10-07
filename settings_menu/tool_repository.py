@@ -16,26 +16,25 @@ SETTINGS_FILE = os.path.join(
 )
 
 DEFAULT_TOOLS = {
-    "Socket": [],
     "Adapter": [],
+    "Allen Key": [],
+    "Brake Tool": [],
+    "Breaker Bar": [],
     "Crowfoot": [],
     "Extension": [],
-    "Wrench": [],
-    "Pliers": [],
-    "Brake Tool": [],
-    "Screwdriver": [],
-    "Breaker Bar": [],
-    "Ratchet": [],
-    "Punch": [],
     "Feeler Gauge": [],
-    "Tool Holder": [],
-    "Torque Wrench": [],
-    "Allen Key": [],
-    "Torx Key": [],
     "Hammer": [],
     "Pick": [],
+    "Pliers": [],
+    "Punch": [],
+    "Ratchet": [],
+    "Screwdriver": [],
+    "Socket": [],
+    "Tool Holder": [],
+    "Torque Wrench": [],
+    "Torx Key": [],
+    "Wrench": [],
 }
-
 
 class ToolRepository:
 

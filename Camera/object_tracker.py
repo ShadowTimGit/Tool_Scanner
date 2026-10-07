@@ -1,28 +1,43 @@
 import os
+from typing import Any
 
 import torch
 from ultralytics import YOLO
 
 from settings_menu.config import MODEL
 
+
 # ==================================================
 # Detection Settings
 # ==================================================
 
-MIN_FRAMES = 10
+MIN_FRAMES = 7
 
 MIN_WIDTH = 30
 MIN_HEIGHT = 30
 MIN_AREA = 1000
 
-CONFIDENCE = 0.40
+CONFIDENCE = 0.35
 
 TRACKER_CONFIG = "Camera/bytetrack_tools.yaml"
 
 MAX_MISSED_FRAMES = 6
 
 
-def get_model_device():
+# ==================================================
+# Device
+# ==================================================
+
+def get_model_device() -> str:
+    """
+    Determine the best available inference device.
+
+    TOOL_SCANNER_DEVICE can be used to explicitly request:
+        cpu
+        cuda
+        mps
+    """
+
     requested = os.getenv(
         "TOOL_SCANNER_DEVICE",
         "",
@@ -30,12 +45,29 @@ def get_model_device():
 
     if requested:
         if requested in {"cpu", "cuda", "mps"}:
-            return requested
+            # Fall back if the explicitly requested accelerator
+            # is not actually available.
+            if requested == "cuda":
+                return (
+                    "cuda"
+                    if torch.cuda.is_available()
+                    else "cpu"
+                )
 
-        return (
-            "cuda"
-            if torch.cuda.is_available()
-            else "cpu"
+            if requested == "mps":
+                if (
+                    hasattr(torch.backends, "mps")
+                    and torch.backends.mps.is_available()
+                ):
+                    return "mps"
+
+                return "cpu"
+
+            return "cpu"
+
+        print(
+            f"[ToolScanner] Invalid device "
+            f"'{requested}', using automatic selection."
         )
 
     if torch.cuda.is_available():
@@ -50,13 +82,26 @@ def get_model_device():
     return "cpu"
 
 
+# ==================================================
+# Object Tracker
+# ==================================================
+
 class ObjectTracker:
 
-    def __init__(self):
+    def __init__(self) -> None:
 
         # -------------------------
-        # YOLO model
+        # Device
         # -------------------------
+
+        self.tracker_settings = {
+            "track_high_thresh": 0.60,
+            "track_low_thresh": 0.10,
+            "new_track_thresh": 0.50,
+            "track_buffer": 50,
+            "match_thresh": 0.65,
+            "fuse_score": True,
+        }
 
         self.device = get_model_device()
 
@@ -70,15 +115,127 @@ class ObjectTracker:
             f"{MODEL}"
         )
 
+        # -------------------------
+        # YOLO model
+        # -------------------------
+
         self.model = YOLO(MODEL)
-        self.model.to(self.device)
+
+        self.model.to(
+            self.device
+        )
+
+        # -------------------------
+        # Model class names
+        # -------------------------
+
+        self.model_names = self.model.names
 
         # -------------------------
         # Tracked objects
         # -------------------------
 
-        self.objects = {}
+        self.objects: dict[int, dict[str, Any]] = {}
 
+    # ==================================================
+    # Runtime Tracker Settings
+    # ==================================================
+
+    def set_tracker_setting(
+        self,
+        name: str,
+        value,
+    ) -> None:
+
+        if name not in self.tracker_settings:
+            return
+
+        self.tracker_settings[name] = value
+
+        # Apply to the currently active ByteTrack instance.
+        predictor = getattr(
+            self.model,
+            "predictor",
+            None,
+        )
+
+        if predictor is None:
+            return
+
+        trackers = getattr(
+            predictor,
+            "trackers",
+            None,
+        )
+
+        if not trackers:
+            return
+
+        for tracker in trackers:
+
+            args = getattr(
+                tracker,
+                "args",
+                None,
+            )
+
+            if args is not None:
+                setattr(
+                    args,
+                    name,
+                    value,
+                )
+
+            # ByteTrack caches track_buffer separately.
+            if name == "track_buffer":
+                tracker.max_time_lost = int(value)
+
+
+    def _apply_tracker_settings(self) -> None:
+
+        predictor = getattr(
+            self.model,
+            "predictor",
+            None,
+        )
+
+        if predictor is None:
+            return
+
+        trackers = getattr(
+            predictor,
+            "trackers",
+            None,
+        )
+
+        if not trackers:
+            return
+
+        for tracker in trackers:
+
+            args = getattr(
+                tracker,
+                "args",
+                None,
+            )
+
+            if args is not None:
+                for name, value in self.tracker_settings.items():
+                    setattr(
+                        args,
+                        name,
+                        value,
+                    )
+
+            if hasattr(
+                tracker,
+                "max_time_lost",
+            ):
+                tracker.max_time_lost = int(
+                    self.tracker_settings[
+                        "track_buffer"
+                    ]
+                )
 
     # ==================================================
     # Detect + Track Objects
@@ -87,7 +244,10 @@ class ObjectTracker:
     def detect(
         self,
         frame,
-    ):
+    ) -> list[dict[str, Any]]:
+
+        if frame is None:
+            return []
 
         results = self.model.track(
             frame,
@@ -97,38 +257,75 @@ class ObjectTracker:
             verbose=False,
             device=self.device,
         )
-        
-        detections = []
 
-        model_names = self.model.names
+        self._apply_tracker_settings()
+
+        detections: list[dict[str, Any]] = []
 
         for result in results:
 
-            if result.boxes is None:
-                continue
-
             boxes = result.boxes
 
-            for index, box in enumerate(boxes):
+            if boxes is None or len(boxes) == 0:
+                continue
 
-                # -------------------------
-                # Bounding box
-                # -------------------------
+            # -------------------------
+            # Extract tensors once
+            # -------------------------
 
-                x1, y1, x2, y2 = (
-                    box.xyxy[0]
+            xyxy = (
+                boxes.xyxy
+                .detach()
+                .cpu()
+                .numpy()
+            )
+
+            confidences = (
+                boxes.conf
+                .detach()
+                .cpu()
+                .numpy()
+                if boxes.conf is not None
+                else None
+            )
+
+            class_ids = (
+                boxes.cls
+                .detach()
+                .cpu()
+                .numpy()
+                if boxes.cls is not None
+                else None
+            )
+
+            track_ids = None
+
+            if boxes.id is not None:
+                track_ids = (
+                    boxes.id
+                    .detach()
                     .cpu()
                     .numpy()
-                    .astype(int)
                 )
 
-                x = int(x1)
-                y = int(y1)
+            # -------------------------
+            # Process detections
+            # -------------------------
 
-                w = int(x2 - x1)
-                h = int(y2 - y1)
+            for index, coordinates in enumerate(xyxy):
 
-                area = w * h
+                x1, y1, x2, y2 = coordinates
+
+                x1 = int(x1)
+                y1 = int(y1)
+                x2 = int(x2)
+                y2 = int(y2)
+
+                x = x1
+                y = y1
+
+                w = x2 - x1
+                h = y2 - y1
 
                 # -------------------------
                 # Size filtering
@@ -140,8 +337,14 @@ class ObjectTracker:
                 if h < MIN_HEIGHT:
                     continue
 
+                area = w * h
+
                 if area < MIN_AREA:
                     continue
+
+                # -------------------------
+                # Center
+                # -------------------------
 
                 center_x = x + w // 2
                 center_y = y + h // 2
@@ -150,41 +353,62 @@ class ObjectTracker:
                 # Confidence
                 # -------------------------
 
-                confidence = float(
-                    box.conf[0]
-                    .cpu()
-                    .item()
-                )
+                if confidences is not None:
+                    confidence = float(
+                        confidences[index]
+                    )
+                else:
+                    confidence = 0.0
 
                 # -------------------------
                 # Class
                 # -------------------------
 
-                class_id = int(
-                    box.cls[0]
-                    .cpu()
-                    .item()
-                )
+                if class_ids is not None:
+                    class_id = int(
+                        class_ids[index]
+                    )
+                else:
+                    class_id = -1
 
-                class_name = model_names[
-                    class_id
-                ]
+                if isinstance(
+                    self.model_names,
+                    dict,
+                ):
+                    class_name = self.model_names.get(
+                        class_id,
+                        str(class_id),
+                    )
+                else:
+                    try:
+                        class_name = self.model_names[
+                            class_id
+                        ]
+                    except (
+                        IndexError,
+                        KeyError,
+                    ):
+                        class_name = str(
+                            class_id
+                        )
 
                 # -------------------------
-                # YOLO / ByteTrack ID
+                # Tracker ID
                 # -------------------------
 
-                if boxes.id is not None:
+                object_id = None
 
+                if (
+                    track_ids is not None
+                    and index < len(track_ids)
+                ):
                     object_id = int(
-                        boxes.id[index]
-                        .cpu()
-                        .item()
+                        track_ids[index]
                     )
 
-                else:
-
-                    object_id = None
+                # -------------------------
+                # Detection
+                # -------------------------
 
                 detections.append(
                     {
@@ -201,167 +425,184 @@ class ObjectTracker:
                     }
                 )
 
-        # -------------------------
-        # Update persistent tracker
-        # -------------------------
-
         return detections
+
 
     # ==================================================
     # Update Objects
     # ==================================================
 
-    def update(self, detections):
-        visible_ids = set()
+    def update(
+        self,
+        detections: list[dict[str, Any]],
+    ) -> dict[int, dict[str, Any]]:
+
+        visible_ids: set[int] = set()
 
         for detection in detections:
-            object_id = detection["id"]
+
+            object_id = detection.get("id")
+
+            # -------------------------
+            # Ignore untracked detections
+            # -------------------------
 
             if object_id is None:
                 continue
 
+            object_id = int(object_id)
+
             visible_ids.add(object_id)
 
+            # ==================================================
+            # Existing Object
+            # ==================================================
+
             if object_id in self.objects:
-                obj = self.objects[object_id]
 
-                obj["x"] = detection["x"]
-                obj["y"] = detection["y"]
-                obj["w"] = detection["w"]
-                obj["h"] = detection["h"]
+                obj = self.objects[
+                    object_id
+                ]
 
-                obj["center_x"] = (
-                    detection["center_x"]
-                )
+                # -------------------------
+                # Update current detection
+                # -------------------------
 
-                obj["center_y"] = (
-                    detection["center_y"]
+                obj.update(
+                    detection
                 )
 
                 obj["frames"] += 1
                 obj["missed_frames"] = 0
 
-                current_area = (
-                    detection["w"]
-                    * detection["h"]
-                )
-
-                best_area = (
-                    obj["best_w"]
-                    * obj["best_h"]
-                )
-
-                if current_area > best_area:
-                    obj["best_x"] = detection["x"]
-                    obj["best_y"] = detection["y"]
-                    obj["best_w"] = detection["w"]
-                    obj["best_h"] = detection["h"]
+            # ==================================================
+            # New Object
+            # ==================================================
 
             else:
-                self.objects[object_id] = {
-                    "id": object_id,
-                    "x": detection["x"],
-                    "y": detection["y"],
-                    "w": detection["w"],
-                    "h": detection["h"],
-                    "center_x": detection["center_x"],
-                    "center_y": detection["center_y"],
+
+                self.objects[
+                    object_id
+                ] = {
+
+                    **detection,
+
                     "frames": 1,
+
                     "missed_frames": 0,
+
                     "captured": False,
-                    "best_x": detection["x"],
-                    "best_y": detection["y"],
-                    "best_w": detection["w"],
-                    "best_h": detection["h"],
-                    "class_name": detection.get("class_name"),
-                    "class_id": detection.get("class_id"),
-                    "confidence": detection.get("confidence", 0),
                 }
 
-        # Only increment missed_frames when YOLO actually ran.
-        for object_id in list(self.objects.keys()):
+        # ==================================================
+        # Handle Missing Objects
+        # ==================================================
+
+        stale_ids = []
+
+        for object_id, obj in self.objects.items():
 
             if object_id in visible_ids:
                 continue
 
-            self.objects[object_id]["missed_frames"] += 1
+            obj["missed_frames"] += 1
 
             if (
-                self.objects[object_id]["missed_frames"]
+                obj["missed_frames"]
                 > MAX_MISSED_FRAMES
             ):
-                del self.objects[object_id]
+                stale_ids.append(
+                    object_id
+                )
+
+        # -------------------------
+        # Remove stale objects
+        # -------------------------
+
+        for object_id in stale_ids:
+
+            del self.objects[
+                object_id
+            ]
 
         return self.objects
 
-    def get_visible_objects(self):
 
-        visible_objects = []
 
-        for object_id, obj in self.objects.items():
+    # ==================================================
+    # Get Valid Objects
+    # ==================================================
 
-            # -------------------------
-            # Copy object so the
-            # persistent state is not
-            # accidentally modified
-            # by the drawing code.
-            # -------------------------
+    def get_confirmed_objects(
+        self,
+    ) -> dict[int, dict[str, Any]]:
 
-            visible_object = dict(obj)
+        """
+        Return objects that have been tracked for at
+        least MIN_FRAMES frames.
+        """
 
-            # -------------------------
-            # If ByteTrack missed the
-            # object, retain its last
-            # known bounding box.
-            # -------------------------
+        return {
+            object_id: obj
+            for object_id, obj in self.objects.items()
+            if obj["frames"] >= MIN_FRAMES
+        }
 
-            if obj["missed_frames"] > 0:
 
-                visible_object["x"] = obj[
-                    "x"
-                ]
+    # ==================================================
+    # Reset Tracker
+    # ==================================================
 
-                visible_object["y"] = obj[
-                    "y"
-                ]
+    def reset(self) -> None:
 
-                visible_object["w"] = obj[
-                    "w"
-                ]
+        # -------------------------
+        # Clear tracked objects
+        # -------------------------
 
-                visible_object["h"] = obj[
-                    "h"
-                ]
+        self.objects.clear()
 
-                visible_object["center_x"] = (
-                    obj["center_x"]
-                )
+        # -------------------------
+        # Reset YOLO tracking state
+        #
+        # Do NOT set predictor.trackers
+        # to None. Ultralytics expects
+        # this to be initialized before
+        # model.track() is called.
+        # -------------------------
 
-                visible_object["center_y"] = (
-                    obj["center_y"]
-                )
+        try:
 
-            visible_objects.append(
-                visible_object
+            predictor = getattr(
+                self.model,
+                "predictor",
+                None,
             )
 
-        return visible_objects
+            if predictor is None:
+                return
 
+            trackers = getattr(
+                predictor,
+                "trackers",
+                None,
+            )
 
-    # ==================================================
-    # Reset
-    # ==================================================
+            if not trackers:
+                return
 
-    def reset(self):
+            for tracker in trackers:
 
-        self.objects = {}
+                if hasattr(
+                    tracker,
+                    "reset",
+                ):
+                    tracker.reset()
 
-        # -------------------------
-        # Reset YOLO / ByteTrack
-        # -------------------------
+            self._apply_tracker_settings()
 
-        self.model = YOLO(MODEL)
+        except Exception as error:
 
-        self.model.to(
-            self.device
-        )
+            print(
+                f"[ToolScanner] Tracker reset error: "
+                f"{error}"
+            )

@@ -4,8 +4,6 @@ import os
 import threading
 import time
 
-from tool_logger.logger_worker import submit_json
-
 from datetime import datetime
 
 from settings_menu.config import (
@@ -22,8 +20,6 @@ from Camera.camera_settings import (
 
 from Camera.object_tracker import (
     ObjectTracker,
-    MAX_MISSED_FRAMES,
-    MIN_FRAMES,
 )
 
 from Camera.box_manager import (
@@ -35,6 +31,22 @@ from GUI.gui_constants import (
     INVENTORY_SALE,
 )
 
+from Camera.camera_processor_capture import (
+    CameraCaptureMixin,
+)
+
+from Camera.camera_processor_detection import (
+    CameraDetectionMixin,
+)
+
+from Camera.camera_constants import (
+    CAPTURE_INTERVAL,
+    TRIGGER_MANUAL,
+    TRIGGER_AUTOMATIC,
+    TRIGGER_CONTINUOUS,
+    DEBUG_AUTO_CAPTURE,
+    DEBUG_CAMERA,
+)
 
 def get_output_dir():
     try:
@@ -70,19 +82,8 @@ CROP_MODE_OBJECTS = "All Objects in Counting Box"
 CROP_MODE_PREVIEW = "Preview Crop Box"
 CROP_MODE_FULL = "Full Image"
 
-TRIGGER_MANUAL = "Manual"
-TRIGGER_AUTOMATIC = "Automatic"
-TRIGGER_CONTINUOUS = "Continuous Counting"
-
 WINDOW_NAME = "Camera"
 
-
-# ==================================================
-# Debug Settings
-# ==================================================
-
-DEBUG_AUTO_CAPTURE = False
-DEBUG_CAMERA = False
 
 INVENTORY_SETTINGS_PATH = os.path.join(
     os.path.dirname(__file__),
@@ -111,7 +112,10 @@ def load_estimated_values():
     )
 
 
-class CameraProcessor:
+class CameraProcessor(
+    CameraCaptureMixin,
+    CameraDetectionMixin,
+):
 
     def __init__(self):
 
@@ -131,7 +135,6 @@ class CameraProcessor:
         # -------------------------
 
         self.recent_crops_callback = None
-
         self.metadata_sync_callback = None
 
         self.settings = CameraSettings()
@@ -178,6 +181,8 @@ class CameraProcessor:
 
         self.tracker = ObjectTracker()
 
+        self.tracker_lock = threading.RLock()
+
         # -------------------------
         # Capture
         # -------------------------
@@ -192,7 +197,7 @@ class CameraProcessor:
             float(
                 os.getenv(
                     "TOOL_SCANNER_DETECTION_INTERVAL",
-                    "0.15",
+                    "0.08",
                 )
             ),
         )
@@ -230,6 +235,7 @@ class CameraProcessor:
         self.part_number = None
         self.invoice_price = None
         self.profit = None
+        self.image_date = None
 
         self.estimated_values = (
             load_estimated_values()
@@ -247,7 +253,6 @@ class CameraProcessor:
         # ==================================================
 
         self.processing_thread = None
-
         self.processing_running = True
 
         self.processing_condition = (
@@ -267,11 +272,21 @@ class CameraProcessor:
 
         self.processing_thread.start()
 
+    # ==================================================
+    # Callbacks
+    # ==================================================
+
     def set_recent_crops_callback(
         self,
         callback,
     ):
         self.recent_crops_callback = callback
+
+    def set_metadata_sync_callback(
+        self,
+        callback,
+    ):
+        self.metadata_sync_callback = callback
 
     # ==================================================
     # Background Processing
@@ -302,8 +317,11 @@ class CameraProcessor:
 
             try:
 
-                processed_frame, detection_count = (
-                    self._process_frame_sync(frame)
+                (
+                    processed_frame,
+                    detection_count,
+                ) = self._process_frame_sync(
+                    frame
                 )
 
                 with self.processing_condition:
@@ -316,13 +334,15 @@ class CameraProcessor:
                         detection_count
                     )
 
-            except Exception as error:
+            except Exception:
+
+                import traceback
 
                 print(
                     "CAMERA PROCESSING ERROR:"
                 )
 
-                print(error)
+                traceback.print_exc()
 
     def process_frame(self, frame):
         """
@@ -336,10 +356,6 @@ class CameraProcessor:
         if frame is None:
             return None, 0
 
-        # Only keep the newest pending frame.
-        #
-        # If processing is slower than the camera,
-        # there is no reason to process every old frame.
         with self.processing_condition:
 
             self.pending_frame = frame.copy()
@@ -353,7 +369,6 @@ class CameraProcessor:
                     self.latest_detection_count,
                 )
 
-        # Processing has not produced a frame yet.
         return frame, 0
 
     def _process_frame_sync(self, frame):
@@ -403,8 +418,6 @@ class CameraProcessor:
             objects_inside
         )
 
-        # When YOLO is skipped, detections is None.
-        # Use the currently tracked objects for the display count.
         detection_count = (
             len(detections)
             if detections is not None
@@ -450,6 +463,7 @@ class CameraProcessor:
     # Video Sources
     # ==================================================
 
+    @staticmethod
     def get_available_video_sources(
         max_sources=10,
     ):
@@ -541,18 +555,13 @@ class CameraProcessor:
 
                 return False
 
-        self.tracker.reset()
+        with self.tracker_lock:
+            self.tracker.reset()
 
         self.processed_object_ids.clear()
         self.counting_object_ids.clear()
 
         return True
-
-    def set_metadata_sync_callback(
-        self,
-        callback,
-    ):
-        self.metadata_sync_callback = callback
 
     def set_inventory_type(
         self,
@@ -566,131 +575,6 @@ class CameraProcessor:
             return
 
         self.inventory_type = inventory_type
-
-    # ==================================================
-    # Estimated Values
-    # ==================================================
-
-    def get_estimated_value(
-        self,
-        tool_name,
-    ):
-
-        if not tool_name:
-            return 5.00
-
-        value = self.estimated_values.get(
-            str(tool_name).strip()
-        )
-
-        if value is None:
-            return 5.00
-
-        try:
-            return float(value)
-
-        except (
-            TypeError,
-            ValueError,
-        ):
-            return 5.00
-
-    # ==================================================
-    # Metadata
-    # ==================================================
-
-    def set_metadata(
-        self,
-        tool=None,
-        size_1=None,
-        size_2=None,
-        brand=None,
-        measurement=None,
-        drive=None,
-        point=None,
-        specialty_socket=None,
-        invoice=None,
-        ebay_id=None,
-        estimated_value=None,
-        number_sold=None,
-        part_number=None,
-        invoice_price=None,
-        profit=None,
-        image_date=None,
-    ):
-
-        self.tool = tool
-        self.size_1 = size_1
-        self.size_2 = size_2
-        self.brand = brand
-        self.measurement = measurement
-        self.drive = drive
-        self.point = point
-        self.specialty_socket = (
-            specialty_socket
-        )
-
-        self.invoice = (
-            invoice.strip()
-            if invoice
-            else "DEFAULT"
-        )
-
-        self.ebay_id = (
-            ebay_id.strip()
-            if ebay_id
-            else "None"
-        )
-
-        self.invoice_price = (
-            invoice_price.strip()
-            if invoice_price
-            else "0"
-        )
-
-        self.part_number = (
-            part_number.strip()
-            if part_number
-            else "NA"
-        )
-
-        self.estimated_value = (
-            self.get_estimated_value(
-                tool
-            )
-        )
-
-        self.number_sold = number_sold
-        self.profit = profit
-        self.image_date = image_date
-
-    def get_capture_output_dir(self):
-
-        invoice = (
-            self.invoice.strip()
-            if self.invoice
-            else "DEFAULT"
-        )
-
-        return os.path.join(
-            self.output_dir,
-            self.inventory_type,
-            invoice,
-            self.tool,
-            self.brand,
-        )
-
-    def get_file_prefix(self):
-
-        invoice = (
-            self.invoice.strip()
-            if self.invoice
-            else "DEFAULT"
-        )
-
-        return (
-            f"{invoice}_{self.tool}_{self.brand}_"
-        )
 
     # ==================================================
     # Settings
@@ -826,1298 +710,6 @@ class CameraProcessor:
         self.manual_trigger_requested = True
 
     # ==================================================
-    # Object Helpers
-    # ==================================================
-
-    def get_object_type(
-        self,
-        obj,
-    ):
-
-        return (
-            obj.get("class_name")
-            or obj.get("label")
-            or obj.get("class")
-            or obj.get("type")
-            or ""
-        )
-
-    def point_inside_counting_box(
-        self,
-        x,
-        y,
-    ):
-
-        if self.counting_box is None:
-            return False
-
-        x1, y1, x2, y2 = (
-            self.counting_box
-        )
-
-        return (
-            x1 <= x <= x2
-            and y1 <= y <= y2
-        )
-
-    def object_center_inside_counting_box(
-        self,
-        box,
-    ):
-
-        if box is None:
-            return False
-
-        x1, y1, x2, y2 = box
-
-        center_x = (
-            x1 + x2
-        ) / 2
-
-        center_y = (
-            y1 + y2
-        ) / 2
-
-        return self.point_inside_counting_box(
-            center_x,
-            center_y,
-        )
-
-    def expanded_object_box(
-        self,
-        box,
-        frame,
-    ):
-
-        if box is None:
-            return None
-
-        x1, y1, x2, y2 = box
-
-        width = x2 - x1
-        height = y2 - y1
-
-        expand_x = width * 0.25
-        expand_y = height * 0.25
-
-        frame_height, frame_width = (
-            frame.shape[:2]
-        )
-
-        return [
-            max(
-                0,
-                int(x1 - expand_x),
-            ),
-            max(
-                0,
-                int(y1 - expand_y),
-            ),
-            min(
-                frame_width,
-                int(x2 + expand_x),
-            ),
-            min(
-                frame_height,
-                int(y2 + expand_y),
-            ),
-        ]
-
-    def crop_from_box(
-        self,
-        frame,
-        box,
-    ):
-
-        if (
-            frame is None
-            or box is None
-        ):
-            return None
-
-        height, width = (
-            frame.shape[:2]
-        )
-
-        x1, y1, x2, y2 = [
-            int(value)
-            for value in box
-        ]
-
-        x1 = max(
-            0,
-            min(x1, width),
-        )
-
-        x2 = max(
-            0,
-            min(x2, width),
-        )
-
-        y1 = max(
-            0,
-            min(y1, height),
-        )
-
-        y2 = max(
-            0,
-            min(y2, height),
-        )
-
-        if (
-            x2 <= x1
-            or y2 <= y1
-        ):
-            return None
-
-        crop = frame[
-            y1:y2,
-            x1:x2,
-        ].copy()
-
-        if crop.size == 0:
-            return None
-
-        return crop
-
-    # ==================================================
-    # Capture Crop
-    # ==================================================
-
-    def get_capture_crop(
-        self,
-        frame,
-        objects,
-    ):
-
-        if self.crop_mode == CROP_MODE_FULL:
-            return frame.copy()
-
-        if self.crop_mode == CROP_MODE_PREVIEW:
-            return self.crop_from_box(
-                frame,
-                self.crop_box,
-            )
-
-        if self.crop_mode == CROP_MODE_EXPANDED:
-
-            for object_id, obj in objects.items():
-
-                if obj["frames"] < MIN_FRAMES:
-                    continue
-
-                box = [
-                    obj["x"],
-                    obj["y"],
-                    obj["x"] + obj["w"],
-                    obj["y"] + obj["h"],
-                ]
-
-                if self.object_center_inside_counting_box(
-                    box
-                ):
-
-                    expanded = (
-                        self.expanded_object_box(
-                            box,
-                            frame,
-                        )
-                    )
-
-                    return self.crop_from_box(
-                        frame,
-                        expanded,
-                    )
-
-            return None
-
-        if self.crop_mode == CROP_MODE_OBJECTS:
-
-            boxes = []
-
-            for object_id, obj in objects.items():
-
-                if obj["frames"] < MIN_FRAMES:
-                    continue
-
-                box = [
-                    obj["x"],
-                    obj["y"],
-                    obj["x"] + obj["w"],
-                    obj["y"] + obj["h"],
-                ]
-
-                if self.object_center_inside_counting_box(
-                    box
-                ):
-                    boxes.append(box)
-
-            if not boxes:
-                return None
-
-            x1 = min(
-                box[0]
-                for box in boxes
-            )
-
-            y1 = min(
-                box[1]
-                for box in boxes
-            )
-
-            x2 = max(
-                box[2]
-                for box in boxes
-            )
-
-            y2 = max(
-                box[3]
-                for box in boxes
-            )
-
-            return self.crop_from_box(
-                frame,
-                [x1, y1, x2, y2],
-            )
-
-        return None
-
-    # ==================================================
-    # Manual Snapshot
-    # ==================================================
-
-    def save_manual_snapshot(
-        self,
-        frame,
-    ):
-
-        if frame is None:
-            return None
-
-        output_dir = os.path.join(
-            get_output_dir(),
-            "Manual_Captures",
-        )
-
-        os.makedirs(
-            output_dir,
-            exist_ok=True,
-        )
-
-        timestamp = (
-            datetime.now().strftime(
-                "%Y%m%d_%H%M%S_%f"
-            )
-        )
-
-        filename = (
-            f"ManualCapture_{timestamp}.jpg"
-        )
-
-        filepath = os.path.join(
-            output_dir,
-            filename,
-        )
-
-        if not cv2.imwrite(
-            filepath,
-            frame,
-        ):
-            return None
-
-        print(
-            f"Saved manual snapshot: {filepath}"
-        )
-
-        return filepath
-
-    # ==================================================
-    # Capture Current Counting Area
-    # ==================================================
-
-    def capture_counting_area(
-        self,
-        frame,
-        objects,
-        object_id=None,
-    ):
-
-        if (
-            not self.tool
-            or not self.brand
-        ):
-
-            print(
-                "Tool and brand must be selected before capturing."
-            )
-
-            return None
-
-        crop = self.get_capture_crop(
-            frame,
-            objects,
-        )
-
-        if crop is None:
-            return None
-
-        today = datetime.now()
-
-        self.output_dir = os.path.abspath(
-            get_output_dir()
-        )
-
-        output_dir = (
-            self.get_capture_output_dir()
-        )
-
-        os.makedirs(
-            output_dir,
-            exist_ok=True,
-        )
-
-        crop_number = (
-            self.get_next_tool_number()
-        )
-
-        if crop_number is None:
-            return None
-
-        prefix = self.get_file_prefix()
-
-        filename = (
-            f"{prefix}{crop_number:03d}_Unlogged.jpg"
-        )
-
-        filepath = os.path.join(
-            output_dir,
-            filename,
-        )
-
-        json_filename = (
-            f"{prefix}{crop_number:03d}_Logged.json"
-        )
-
-        json_filepath = os.path.join(
-            output_dir,
-            json_filename,
-        )
-
-        absolute_image_path = (
-            os.path.abspath(
-                filepath
-            )
-        )
-
-        absolute_json_path = (
-            os.path.abspath(
-                json_filepath
-            )
-        )
-
-        metadata = {
-            "Tool Name": self.tool,
-            "Size-1": self.size_1,
-            "Size-2": self.size_2,
-            "Brand": self.brand,
-            "Measurement": self.measurement,
-            "Drive": self.drive,
-            "Point": self.point,
-            "Specialty Socket": self.specialty_socket,
-            "Invoice": (
-                self.invoice.strip()
-                if self.invoice
-                else "DEFAULT"
-            ),
-            "eBay ID": self.ebay_id,
-            "Part Number": self.part_number,
-            "Invoice Price": self.invoice_price,
-            "Date": today.strftime("%Y-%m-%d"),
-            "Inventory Type": self.inventory_type,
-            "File Path to Image": absolute_image_path,
-            "File Path to JSON": absolute_json_path,
-        }
-
-        if not cv2.imwrite(
-            filepath,
-            crop,
-        ):
-            print(
-                f"ERROR: Could not save image: "
-                f"{filepath}"
-            )
-            return None
-
-        session_entry = {
-            "json_path": absolute_json_path,
-            "image_path": absolute_image_path,
-            "tool_name": self.tool,
-            "brand_name": self.brand,
-            "display_name": (
-                f"{self.tool} / {self.brand}"
-            ),
-        }
-
-        self.recent_session_crops.insert(
-            0,
-            session_entry,
-        )
-
-        if len(
-            self.recent_session_crops
-        ) > 25:
-
-            self.recent_session_crops = (
-                self.recent_session_crops[:25]
-            )
-
-        if self.recent_crops_callback:
-            self.recent_crops_callback()
-
-        try:
-
-            with open(
-                json_filepath,
-                "w",
-                encoding="utf-8",
-            ) as file:
-
-                json.dump(
-                    metadata,
-                    file,
-                    indent=4,
-                    ensure_ascii=False,
-                )
-
-        except OSError as error:
-
-            print(
-                f"ERROR: Could not save metadata JSON: "
-                f"{error}"
-            )
-
-            return None
-
-        submit_json(
-            absolute_json_path
-        )
-
-        self.crop_number += 1
-
-        self.last_capture_time = (
-            cv2.getTickCount()
-            / cv2.getTickFrequency()
-        )
-
-        print(
-            f"Saved object: {filepath}"
-        )
-
-        return filepath
-
-    # ==================================================
-    # Detection / Tracking
-    # ==================================================
-
-    def _detect_objects(self, frame):
-        now = time.monotonic()
-
-        should_detect = (
-            now - self.last_detection_time >= self.detection_interval
-            or not self.tracker.objects
-        )
-
-        if not should_detect:
-            return None
-
-        detections = self.tracker.detect(frame)
-
-        self.last_detection_time = now
-
-        return detections
-
-    def _update_tracked_objects(self, detections):
-        if detections is None:
-            return self.tracker.objects
-
-        return self.tracker.update(detections)
-
-    def _get_current_capture_time(
-        self,
-    ):
-
-        return (
-            cv2.getTickCount()
-            / cv2.getTickFrequency()
-        )
-
-    # ==================================================
-    # Automatic Scan / Red Detection
-    # ==================================================
-
-    def _check_red_scan(
-        self,
-        frame,
-    ):
-
-        if (
-            self.trigger_mode
-            != TRIGGER_AUTOMATIC
-            or not self.require_red_for_automatic
-            or self.scan_box is None
-        ):
-            return True
-
-        return self.has_red_in_scan_area(
-            frame
-        )
-
-    # ==================================================
-    # Tracked Object Processing
-    # ==================================================
-
-    def _process_tracked_objects(
-        self,
-        frame,
-        original_frame,
-        objects,
-        red_detected,
-        current_time,
-    ):
-
-        objects_inside = set()
-
-        for object_id, obj in objects.items():
-
-            object_box = (
-                self._get_object_box(obj)
-            )
-
-            center_inside = (
-                self.object_center_inside_counting_box(
-                    object_box
-                )
-            )
-
-            if center_inside:
-                objects_inside.add(
-                    object_id
-                )
-
-            object_entered = (
-                center_inside
-                and object_id
-                not in self.counting_object_ids
-            )
-
-            self._draw_tracked_object(
-                frame=frame,
-                object_id=object_id,
-                obj=obj,
-            )
-
-            self._handle_object_capture_or_count(
-                original_frame=original_frame,
-                objects=objects,
-                object_id=object_id,
-                obj=obj,
-                center_inside=center_inside,
-                object_entered=object_entered,
-                red_detected=red_detected,
-                current_time=current_time,
-            )
-
-        return objects_inside
-
-    def _get_object_box(
-        self,
-        obj,
-    ):
-
-        return [
-            obj["x"],
-            obj["y"],
-            obj["x"] + obj["w"],
-            obj["y"] + obj["h"],
-        ]
-
-    def _draw_tracked_object(
-        self,
-        frame,
-        object_id,
-        obj,
-    ):
-
-        x = obj["x"]
-        y = obj["y"]
-        w = obj["w"]
-        h = obj["h"]
-
-        cv2.rectangle(
-            frame,
-            (x, y),
-            (x + w, y + h),
-            (0, 255, 0),
-            2,
-        )
-
-        center_x = x + (
-            w // 2
-        )
-
-        center_y = y + (
-            h // 2
-        )
-
-        cv2.circle(
-            frame,
-            (center_x, center_y),
-            5,
-            (0, 0, 255),
-            -1,
-        )
-
-        cv2.putText(
-            frame,
-            f"ID: {object_id}",
-            (
-                x,
-                max(
-                    y - 25,
-                    20,
-                ),
-            ),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (0, 255, 0),
-            2,
-        )
-
-        label = (
-            f"Frames: {obj['frames']}"
-            if obj["frames"] >= MIN_FRAMES
-            else "Tracking"
-        )
-
-        cv2.putText(
-            frame,
-            label,
-            (
-                x,
-                max(
-                    y - 5,
-                    40,
-                ),
-            ),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (255, 255, 0),
-            1,
-        )
-
-    # ==================================================
-    # Automatic Capture / Continuous Counting
-    # ==================================================
-
-    def _handle_object_capture_or_count(
-        self,
-        original_frame,
-        objects,
-        object_id,
-        obj,
-        center_inside,
-        object_entered,
-        red_detected,
-        current_time,
-    ):
-
-        if self.trigger_mode == TRIGGER_AUTOMATIC:
-
-            self._handle_automatic_capture(
-                original_frame=original_frame,
-                objects=objects,
-                object_id=object_id,
-                obj=obj,
-                center_inside=center_inside,
-                object_entered=object_entered,
-                red_detected=red_detected,
-                current_time=current_time,
-            )
-
-            return
-
-        if (
-            self.trigger_mode
-            == TRIGGER_CONTINUOUS
-        ):
-
-            self._handle_continuous_counting(
-                original_frame=original_frame,
-                objects=objects,
-                object_id=object_id,
-                obj=obj,
-                center_inside=center_inside,
-                object_entered=object_entered,
-            )
-
-    def _should_automatic_capture(
-        self,
-        object_id,
-        obj,
-        center_inside,
-        object_entered,
-        red_detected,
-        current_time,
-    ):
-        time_since_capture = (
-            current_time - self.last_capture_time
-        )
-
-        reason = None
-
-        if not object_entered:
-            reason = "object has not entered counting box"
-
-        # elif obj["frames"] < MIN_FRAMES:
-        #     reason = (
-        #         f"not enough frames "
-        #         f"({obj['frames']}/{MIN_FRAMES})"
-        #     )
-
-        elif not center_inside:
-            reason = "object center outside counting box"
-
-        elif (
-            self.require_red_for_automatic
-            and not red_detected
-        ):
-            reason = "red scan not detected"
-
-        elif object_id in self.processed_object_ids:
-            reason = "object already processed"
-
-        elif time_since_capture < CAPTURE_INTERVAL:
-            reason = (
-                f"capture interval not elapsed "
-                f"({time_since_capture:.2f}s/{CAPTURE_INTERVAL}s)"
-            )
-
-        # Only print when the rejection reason changes.
-        previous_reason = getattr(
-            self,
-            "_auto_debug_reasons",
-            {},
-        ).get(object_id)
-
-        if reason:
-
-            if (
-                DEBUG_AUTO_CAPTURE
-                and previous_reason != reason
-            ):
-                print(
-                    f"[AUTO DEBUG] ID={object_id}: "
-                    f"REJECT - {reason}"
-                )
-
-            if not hasattr(
-                self,
-                "_auto_debug_reasons",
-            ):
-                self._auto_debug_reasons = {}
-
-            self._auto_debug_reasons[
-                object_id
-            ] = reason
-
-            return False
-
-        # Conditions passed.
-        if not hasattr(
-            self,
-            "_auto_debug_reasons",
-        ):
-            self._auto_debug_reasons = {}
-
-        if (
-            DEBUG_AUTO_CAPTURE
-            and previous_reason != "READY"
-        ):
-            print(
-                f"[AUTO DEBUG] ID={object_id}: "
-                f"READY - all automatic capture "
-                f"conditions passed"
-            )
-
-        self._auto_debug_reasons[
-            object_id
-        ] = "READY"
-
-        return True
-
-
-    def _handle_automatic_capture(
-        self,
-        original_frame,
-        objects,
-        object_id,
-        obj,
-        center_inside,
-        object_entered,
-        red_detected,
-        current_time,
-    ):
-        if not self._should_automatic_capture(
-            object_id=object_id,
-            obj=obj,
-            center_inside=center_inside,
-            object_entered=object_entered,
-            red_detected=red_detected,
-            current_time=current_time,
-        ):
-            return
-
-        if DEBUG_AUTO_CAPTURE:
-            print(
-                f"[AUTO DEBUG] "
-                f"CAPTURE TRIGGERED for ID={object_id}"
-            )
-
-        if self.metadata_sync_callback:
-
-            if DEBUG_AUTO_CAPTURE:
-                print(
-                    f"[AUTO DEBUG] "
-                    f"Running metadata sync "
-                    f"for ID={object_id}"
-                )
-
-            self.metadata_sync_callback()
-
-        saved_filename = (
-            self.capture_counting_area(
-                original_frame,
-                objects,
-                object_id,
-            )
-        )
-
-        if not saved_filename:
-
-            if DEBUG_AUTO_CAPTURE:
-                print(
-                    f"[AUTO DEBUG] "
-                    f"CAPTURE FAILED for ID={object_id}: "
-                    f"capture_counting_area() "
-                    f"returned None."
-                )
-
-            return
-
-        if DEBUG_AUTO_CAPTURE:
-            print(
-                f"[AUTO DEBUG] "
-                f"CAPTURE SUCCESS for ID={object_id}: "
-                f"{saved_filename}"
-            )
-
-        self.processed_object_ids.add(
-            object_id
-        )
-
-        obj["captured"] = True
-
-    def _handle_continuous_counting(
-        self,
-        original_frame,
-        objects,
-        object_id,
-        obj,
-        center_inside,
-        object_entered,
-    ):
-
-        if not object_entered:
-            return
-
-        if obj["frames"] < MIN_FRAMES:
-            return
-
-        if not center_inside:
-            return
-
-        if (
-            object_id
-            in self.processed_object_ids
-        ):
-            return
-
-        if self.metadata_sync_callback:
-            self.metadata_sync_callback()
-
-        saved_filename = (
-            self.capture_counting_area(
-                original_frame,
-                objects,
-                object_id,
-            )
-        )
-
-        if not saved_filename:
-            return
-
-        self.processed_object_ids.add(
-            object_id
-        )
-
-        self.continuous_count += 1
-
-        obj["captured"] = True
-
-    # ==================================================
-    # Manual Capture
-    # ==================================================
-
-    def _handle_manual_capture(
-        self,
-        original_frame,
-        objects,
-    ):
-
-        if not self.manual_trigger_requested:
-            return
-
-        self.manual_trigger_requested = False
-
-        manual_objects = (
-            self._get_manual_capture_objects(
-                objects
-            )
-        )
-
-        if (
-            manual_objects
-            or not self.show_counting_box
-        ):
-
-            self._capture_manual_objects(
-                original_frame=original_frame,
-                manual_objects=manual_objects,
-            )
-
-    def _get_manual_capture_objects(
-        self,
-        objects,
-    ):
-
-        if not self.show_counting_box:
-            return objects
-
-        manual_objects = {}
-
-        for object_id, obj in objects.items():
-
-            if obj["frames"] < MIN_FRAMES:
-                continue
-
-            object_box = (
-                self._get_object_box(obj)
-            )
-
-            if self.object_center_inside_counting_box(
-                object_box
-            ):
-
-                manual_objects[
-                    object_id
-                ] = obj
-
-        return manual_objects
-
-    def _capture_manual_objects(
-        self,
-        original_frame,
-        manual_objects,
-    ):
-
-        if self.metadata_sync_callback:
-            self.metadata_sync_callback()
-
-        saved_filename = (
-            self.capture_counting_area(
-                original_frame,
-                manual_objects,
-            )
-        )
-
-        if not saved_filename:
-            return
-
-        for obj in manual_objects.values():
-            obj["captured"] = True
-
-    # ==================================================
-    # Counting State
-    # ==================================================
-
-    def _update_counting_state(
-        self,
-        objects_inside,
-    ):
-
-        objects_that_left = (
-            self.counting_object_ids
-            - objects_inside
-        )
-
-        self.processed_object_ids.difference_update(
-            objects_that_left
-        )
-
-        self.counting_object_ids = (
-            objects_inside
-        )
-
-    # ==================================================
-    # Frame Overlay
-    # ==================================================
-
-    def _draw_frame_overlay(
-        self,
-        frame,
-        detection_count,
-    ):
-
-        self._draw_detection_count(
-            frame,
-            detection_count,
-        )
-
-        self._draw_scan_box(frame)
-        self._draw_crop_box(frame)
-        self._draw_counting_box(frame)
-
-    def _draw_detection_count(
-        self,
-        frame,
-        detection_count,
-    ):
-
-        cv2.putText(
-            frame,
-            f"Objects: {detection_count}",
-            (20, 30),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (0, 255, 255),
-            2,
-        )
-
-        if (
-            self.trigger_mode
-            == TRIGGER_CONTINUOUS
-        ):
-
-            cv2.putText(
-                frame,
-                f"Count: {self.continuous_count}",
-                (20, 60),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (0, 255, 255),
-                2,
-            )
-
-    def _draw_scan_box(
-        self,
-        frame,
-    ):
-
-        if self.scan_box is None:
-            return
-
-        x1, y1, x2, y2 = (
-            self.scan_box
-        )
-
-        cv2.rectangle(
-            frame,
-            (x1, y1),
-            (x2, y2),
-            (255, 0, 255),
-            2,
-        )
-
-        cv2.putText(
-            frame,
-            "Scan Dot",
-            (
-                x1 - 10,
-                max(
-                    y1 - 10,
-                    20,
-                ),
-            ),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (255, 0, 255),
-            2,
-        )
-
-    def _draw_crop_box(
-        self,
-        frame,
-    ):
-
-        if (
-            self.crop_box is None
-            or not self.show_crop_box
-        ):
-            return
-
-        x1, y1, x2, y2 = (
-            self.crop_box
-        )
-
-        color_crop = (
-            0,
-            255,
-            255,
-        )
-
-        cv2.rectangle(
-            frame,
-            (x1, y1),
-            (x2, y2),
-            color_crop,
-            2,
-        )
-
-        cv2.putText(
-            frame,
-            "Preview Crop",
-            (
-                x1 - 10,
-                max(
-                    y1 - 10,
-                    20,
-                ),
-            ),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            color_crop,
-            2,
-        )
-
-    def _draw_counting_box(
-        self,
-        frame,
-    ):
-
-        if (
-            self.counting_box is None
-            or not self.show_counting_box
-        ):
-            return
-
-        x1, y1, x2, y2 = (
-            self.counting_box
-        )
-
-        color_count = (
-            255,
-            255,
-            0,
-        )
-
-        cv2.rectangle(
-            frame,
-            (x1, y1),
-            (x2, y2),
-            color_count,
-            2,
-        )
-
-        cv2.putText(
-            frame,
-            "Counting Box",
-            (
-                x1 - 10,
-                max(
-                    y1 - 10,
-                    20,
-                ),
-            ),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            color_count,
-            2,
-        )
-
-    # ==================================================
-    # Tool Number
-    # ==================================================
-
-    def get_next_tool_number(self):
-
-        if (
-            not self.tool
-            or not self.brand
-        ):
-            return None
-
-        self.output_dir = os.path.abspath(
-            get_output_dir()
-        )
-
-        output_dir = (
-            self.get_capture_output_dir()
-        )
-
-        os.makedirs(
-            output_dir,
-            exist_ok=True,
-        )
-
-        prefix = self.get_file_prefix()
-
-        existing_files = [
-            f
-            for f in os.listdir(output_dir)
-            if (
-                f.startswith(prefix)
-                and f.endswith(".jpg")
-            )
-        ]
-
-        numbers = []
-
-        for filename in existing_files:
-
-            try:
-
-                number_part = (
-                    filename[
-                        len(prefix):
-                    ].split("_")[0]
-                )
-
-                numbers.append(
-                    int(number_part)
-                )
-
-            except (
-                ValueError,
-                IndexError,
-            ):
-                continue
-
-        return max(
-            numbers,
-            default=0,
-        ) + 1
-
-    # ==================================================
     # Set Box Display
     # ==================================================
 
@@ -2139,460 +731,6 @@ class CameraProcessor:
             True,
             show_crop_box,
             show_counting_box,
-        )
-
-    # ==================================================
-    # Crop Object
-    # ==================================================
-
-    def crop_object(
-        self,
-        frame,
-        box,
-    ):
-
-        if frame is None:
-            return None
-
-        if self.crop_box is None:
-            return None
-
-        (
-            x1,
-            y1,
-            x2,
-            y2,
-        ) = self.crop_box
-
-        height, width = (
-            frame.shape[:2]
-        )
-
-        x1 = max(
-            0,
-            min(
-                int(x1),
-                width,
-            ),
-        )
-
-        x2 = max(
-            0,
-            min(
-                int(x2),
-                width,
-            ),
-        )
-
-        y1 = max(
-            0,
-            min(
-                int(y1),
-                height,
-            ),
-        )
-
-        y2 = max(
-            0,
-            min(
-                int(y2),
-                height,
-            ),
-        )
-
-        if (
-            x2 <= x1
-            or y2 <= y1
-        ):
-            return None
-
-        crop = frame[
-            y1:y2,
-            x1:x2,
-        ].copy()
-
-        if crop.size == 0:
-            return None
-
-        return crop
-
-    # ==================================================
-    # Capture
-    # ==================================================
-
-    def capture_object(
-        self,
-        frame,
-        box,
-    ):
-
-        if (
-            not self.tool
-            or not self.brand
-        ):
-
-            print(
-                "Tool and brand must be selected before capturing."
-            )
-
-            return None
-
-        if frame is None:
-            return None
-
-        original = frame.copy()
-
-        today = datetime.now()
-
-        self.output_dir = os.path.abspath(
-            get_output_dir()
-        )
-
-        output_dir = (
-            self.get_capture_output_dir()
-        )
-
-        os.makedirs(
-            output_dir,
-            exist_ok=True,
-        )
-
-        crop_number = (
-            self.get_next_tool_number()
-        )
-
-        if crop_number is None:
-            return None
-
-        prefix = self.get_file_prefix()
-
-        filename = (
-            f"{prefix}{crop_number:03d}_Unlogged.jpg"
-        )
-
-        filepath = os.path.join(
-            output_dir,
-            filename,
-        )
-
-        json_filename = (
-            f"{prefix}{crop_number:03d}_Logged.json"
-        )
-
-        json_filepath = os.path.join(
-            output_dir,
-            json_filename,
-        )
-
-        absolute_image_path = (
-            os.path.abspath(filepath)
-        )
-
-        absolute_json_path = (
-            os.path.abspath(
-                json_filepath
-            )
-        )
-
-        metadata = {
-            "Tool Name": self.tool,
-            "Size-1": self.size_1,
-            "Size-2": self.size_2,
-            "Brand": self.brand,
-            "Measurement": self.measurement,
-            "Drive": self.drive,
-            "Point": self.point,
-            "Specialty Socket": self.specialty_socket,
-            "Invoice": (
-                self.invoice.strip()
-                if self.invoice
-                else "DEFAULT"
-            ),
-            "eBay ID": self.ebay_id,
-            "Part Number": self.part_number,
-            "Estimated Value": self.estimated_value,
-            "Number Sold": self.number_sold,
-            "Invoice Price": self.invoice_price,
-            "Profit": self.profit,
-            "Date": today.strftime("%Y-%m-%d"),
-            "Inventory Type": self.inventory_type,
-            "File Path to Image": absolute_image_path,
-            "File Path to JSON": absolute_json_path,
-        }
-
-        if not cv2.imwrite(
-            filepath,
-            original,
-        ):
-            print(
-                f"ERROR: Could not save image: "
-                f"{filepath}"
-            )
-            return None
-
-        try:
-            with open(
-                json_filepath,
-                "w",
-                encoding="utf-8",
-            ) as file:
-
-                json.dump(
-                    metadata,
-                    file,
-                    indent=4,
-                    ensure_ascii=False,
-                )
-
-        except OSError as error:
-
-            print(
-                f"ERROR: Could not save metadata JSON: "
-                f"{error}"
-            )
-
-            return None
-
-        submit_json(
-            absolute_json_path
-        )
-
-        self.crop_number += 1
-
-        self.last_capture_time = (
-            cv2.getTickCount()
-            / cv2.getTickFrequency()
-        )
-
-        print(
-            f"Saved object: {filepath}"
-        )
-
-        return filepath
-
-    # ==================================================
-    # Object Crop Validation
-    # ==================================================
-
-    def object_inside_crop_area(
-        self,
-        box,
-    ):
-
-        if (
-            box is None
-            or self.crop_box is None
-        ):
-            return False
-
-        (
-            obj_x1,
-            obj_y1,
-            obj_x2,
-            obj_y2,
-        ) = box
-
-        (
-            crop_x1,
-            crop_y1,
-            crop_x2,
-            crop_y2,
-        ) = self.crop_box
-
-        center_x = (
-            obj_x1 + obj_x2
-        ) / 2
-
-        center_y = (
-            obj_y1 + obj_y2
-        ) / 2
-
-        center_inside = (
-            crop_x1 <= center_x <= crop_x2
-            and
-            crop_y1 <= center_y <= crop_y2
-        )
-
-        if not center_inside:
-            return False
-
-        intersection_x1 = max(
-            obj_x1,
-            crop_x1,
-        )
-
-        intersection_y1 = max(
-            obj_y1,
-            crop_y1,
-        )
-
-        intersection_x2 = min(
-            obj_x2,
-            crop_x2,
-        )
-
-        intersection_y2 = min(
-            obj_y2,
-            crop_y2,
-        )
-
-        if (
-            intersection_x2
-            <= intersection_x1
-            or intersection_y2
-            <= intersection_y1
-        ):
-            return False
-
-        intersection_area = (
-            intersection_x2
-            - intersection_x1
-        ) * (
-            intersection_y2
-            - intersection_y1
-        )
-
-        object_area = (
-            obj_x2
-            - obj_x1
-        ) * (
-            obj_y2
-            - obj_y1
-        )
-
-        if object_area <= 0:
-            return False
-
-        percentage_inside = (
-            intersection_area
-            / object_area
-        )
-
-        return (
-            percentage_inside >= 0.75
-        )
-
-    # ==================================================
-    # Red Detection
-    # ==================================================
-
-    def has_red_in_scan_area(
-        self,
-        frame,
-    ):
-
-        if self.scan_box is None:
-            return False
-
-        (
-            x1,
-            y1,
-            x2,
-            y2,
-        ) = self.scan_box
-
-        height, width = (
-            frame.shape[:2]
-        )
-
-        x1 = max(
-            0,
-            min(x1, width),
-        )
-
-        x2 = max(
-            0,
-            min(x2, width),
-        )
-
-        y1 = max(
-            0,
-            min(y1, height),
-        )
-
-        y2 = max(
-            0,
-            min(y2, height),
-        )
-
-        if (
-            x2 <= x1
-            or y2 <= y1
-        ):
-            return False
-
-        scan_area = frame[
-            y1:y2,
-            x1:x2,
-        ]
-
-        hsv = cv2.cvtColor(
-            scan_area,
-            cv2.COLOR_BGR2HSV,
-        )
-
-        lower_red_1 = (
-            0,
-            100,
-            80,
-        )
-
-        upper_red_1 = (
-            10,
-            255,
-            255,
-        )
-
-        lower_red_2 = (
-            170,
-            100,
-            80,
-        )
-
-        upper_red_2 = (
-            180,
-            255,
-            255,
-        )
-
-        mask1 = cv2.inRange(
-            hsv,
-            lower_red_1,
-            upper_red_1,
-        )
-
-        mask2 = cv2.inRange(
-            hsv,
-            lower_red_2,
-            upper_red_2,
-        )
-
-        red_mask = cv2.bitwise_or(
-            mask1,
-            mask2,
-        )
-
-        red_pixels = cv2.countNonZero(
-            red_mask
-        )
-
-        total_pixels = (
-            scan_area.shape[0]
-            * scan_area.shape[1]
-        )
-
-        if total_pixels == 0:
-            return False
-
-        red_percent = (
-            red_pixels
-            / total_pixels
-            * 100
-        )
-
-        return (
-            red_percent
-            >= MIN_RED_PERCENT
         )
 
     # ==================================================
@@ -2823,7 +961,8 @@ class CameraProcessor:
 
             return False
 
-        self.tracker.reset()
+        with self.tracker_lock:
+            self.tracker.reset()
 
         self.box_manager.scale_boxes(
             old_width,
@@ -2849,10 +988,6 @@ class CameraProcessor:
     def get_supported_resolutions(
         self,
     ):
-
-        resolutions_to_test = (
-            SUPPORTED_RESOLUTIONS
-        )
 
         supported = []
 
@@ -2885,7 +1020,7 @@ class CameraProcessor:
             for (
                 width,
                 height,
-            ) in resolutions_to_test:
+            ) in SUPPORTED_RESOLUTIONS:
 
                 self.cap.set(
                     cv2.CAP_PROP_FRAME_WIDTH,
@@ -2965,3 +1100,25 @@ class CameraProcessor:
             print()
 
         return supported
+
+
+    # ==================================================
+    # Tracker Tuning
+    # ==================================================
+
+    def set_tracker_setting(
+        self,
+        name,
+        value,
+    ):
+        with self.tracker_lock:
+            self.tracker.set_tracker_setting(
+                name,
+                value,
+            )
+
+    def reset_tracker(self):
+        with self.tracker_lock:
+            self.tracker.reset()
+
+
