@@ -6,6 +6,7 @@ import tempfile
 import threading
 import urllib.request
 import zipfile
+import subprocess
 
 
 GITHUB_API_URL = (
@@ -222,43 +223,39 @@ def _download_update(
         )
 
 
-def start_update(
-    zip_path,
-    project_dir,
-):
+def start_update(zip_path, project_dir):
     try:
         helper_source = os.path.join(
             project_dir,
             "update_helper.py",
         )
 
-        if not os.path.exists(
-            helper_source
-        ):
+        if not os.path.isfile(helper_source):
             raise FileNotFoundError(
-                "update_helper.py was not found."
+                f"Updater helper not found: {helper_source}"
             )
 
-        import subprocess
+        if not os.path.isfile(zip_path):
+            raise FileNotFoundError(
+                f"Update ZIP not found: {zip_path}"
+            )
 
         subprocess.Popen(
             [
                 sys.executable,
                 helper_source,
                 str(os.getpid()),
-                zip_path,
-                project_dir,
+                os.path.abspath(zip_path),
+                os.path.abspath(project_dir),
             ],
             cwd=project_dir,
+            close_fds=True,
         )
 
         return True
 
     except Exception as e:
-        print(
-            f"Failed to start updater: {e}"
-        )
-
+        print(f"Failed to start updater: {e}", flush=True)
         return False
 
 

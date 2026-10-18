@@ -66,12 +66,24 @@ class ToolScannerGUI(
     camera_initialization_failed_signal = Signal(object)
     recent_crops_changed_signal = Signal()
     show_update_signal = Signal(str, str, str)
+    update_download_finished_signal = Signal(str, str)
+    update_error_signal = Signal(str)
 
     def __init__(self):
         super().__init__()
 
         self.show_update_signal.connect(
             self.show_update_dialog,
+            Qt.ConnectionType.QueuedConnection,
+        )
+
+        self.update_download_finished_signal.connect(
+            self.finish_update,
+            Qt.ConnectionType.QueuedConnection,
+        )
+
+        self.update_error_signal.connect(
+            self.show_update_error,
             Qt.ConnectionType.QueuedConnection,
         )
 
@@ -236,6 +248,7 @@ class ToolScannerGUI(
             download_update(
                 zip_url,
                 self.update_download_finished,
+                lambda message: self.update_error_signal.emit(message),
             )
             print("[GUI] Download task started.", flush=True)
         except Exception as e:
@@ -251,12 +264,16 @@ class ToolScannerGUI(
         temp_dir,
         zip_path,
     ):
-        QTimer.singleShot(
-            0,
-            lambda: self.finish_update(
-                temp_dir,
-                zip_path,
-            ),
+        self.update_download_finished_signal.emit(
+            temp_dir,
+            zip_path,
+        )
+
+    def show_update_error(self, message):
+        QMessageBox.critical(
+            self,
+            "Update Download Failed",
+            f"Could not download the update:\n\n{message}",
         )
 
     def finish_update(
@@ -916,9 +933,7 @@ class ToolScannerGUI(
         self.running = False
 
         self.save_window_size()
-
         self.stop_camera()
-
         self.close_recent_crop_previews()
 
         if (
@@ -927,4 +942,4 @@ class ToolScannerGUI(
         ):
             self.settings_window.close()
 
-        self.close()
+        QApplication.quit()
