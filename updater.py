@@ -182,15 +182,26 @@ def _download_update(
 
 def start_update(zip_path, project_dir):
     try:
+        project_dir = os.path.abspath(project_dir)
+
         helper_source = os.path.join(
             project_dir,
             "update_helper.py",
         )
 
         if not os.path.isfile(helper_source):
-            raise FileNotFoundError(
-                f"Updater helper not found: {helper_source}"
+            parent_helper = os.path.join(
+                os.path.dirname(project_dir),
+                "update_helper.py",
             )
+
+            if os.path.isfile(parent_helper):
+                helper_source = parent_helper
+                project_dir = os.path.dirname(project_dir)
+            else:
+                raise FileNotFoundError(
+                    f"Updater helper not found: {helper_source}"
+                )
 
         if not os.path.isfile(zip_path):
             raise FileNotFoundError(
@@ -203,7 +214,7 @@ def start_update(zip_path, project_dir):
                 helper_source,
                 str(os.getpid()),
                 os.path.abspath(zip_path),
-                os.path.abspath(project_dir),
+                project_dir,
             ],
             cwd=project_dir,
             close_fds=True,
@@ -212,9 +223,11 @@ def start_update(zip_path, project_dir):
         return True
 
     except Exception as e:
-        print(f"Failed to start updater: {e}", flush=True)
+        print(
+            f"Failed to start updater: {e}",
+            flush=True,
+        )
         return False
-
 
 def is_newer_version(
     latest,
