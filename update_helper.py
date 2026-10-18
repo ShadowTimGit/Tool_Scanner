@@ -68,35 +68,20 @@ def wait_for_process(
         )
         raise
 
-def find_source_directory(
-    extract_dir,
-):
-    entries = os.listdir(
-        extract_dir
+def find_source_directory(extract_dir):
+    for root, dirs, files in os.walk(extract_dir):
+        dirs[:] = [
+            d for d in dirs
+            if d not in (".git", ".venv", "__pycache__")
+        ]
+
+        if "main.py" in files:
+            log(f"Found application source: {root}")
+            return root
+
+    raise FileNotFoundError(
+        f"Could not find main.py in extracted ZIP: {extract_dir}"
     )
-
-    directories = [
-        entry
-        for entry in entries
-        if os.path.isdir(
-            os.path.join(
-                extract_dir,
-                entry,
-            )
-        )
-    ]
-
-    log(
-        f"Extracted directories: {directories}"
-    )
-
-    if len(directories) == 1:
-        return os.path.join(
-            extract_dir,
-            directories[0],
-        )
-
-    return extract_dir
 
 
 def copy_directory_contents(
@@ -168,6 +153,10 @@ def restart_application(
     log(
         f"Restarting: {main_path}"
     )
+
+    log(f"Python executable: {sys.executable}")
+    log(f"Working directory: {project_dir}")
+    log(f"main.py exists: {os.path.isfile(main_path)}")
 
     subprocess.Popen(
         [
@@ -250,6 +239,15 @@ def perform_update(
         )
 
         log("Update files copied.")
+
+        if not os.path.isfile(
+            os.path.join(project_dir, "main.py")
+        ):
+            raise FileNotFoundError(
+                "main.py is missing from the project directory."
+            )
+
+        log("Verified main.py exists.")
 
         restart_application(
             project_dir
