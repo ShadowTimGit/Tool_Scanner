@@ -5,7 +5,6 @@ import sys
 import tempfile
 import threading
 import urllib.request
-import zipfile
 
 
 GITHUB_API_URL = (
@@ -66,15 +65,22 @@ def _check_for_updates(
             .lstrip("v")
         )
 
+        print(f"Current version: {current_version}")
+        print(f"Latest GitHub version: {latest_version}")
+
         if is_newer_version(
             latest_version,
             current_version,
         ):
+            print("Update available!")
+
             callback(
                 latest_version,
                 data["html_url"],
                 data["zipball_url"],
             )
+        else:
+            print("Already running the latest version.")
 
     except Exception as e:
         print(

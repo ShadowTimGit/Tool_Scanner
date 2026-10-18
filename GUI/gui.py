@@ -65,9 +65,15 @@ class ToolScannerGUI(
     camera_initialized_signal = Signal(object)
     camera_initialization_failed_signal = Signal(object)
     recent_crops_changed_signal = Signal()
+    show_update_signal = Signal(str, str, str)
 
     def __init__(self):
         super().__init__()
+
+        self.show_update_signal.connect(
+            self.show_update_dialog,
+            Qt.ConnectionType.QueuedConnection,
+        )
 
         self.recent_crops_changed_signal.connect(
             self._refresh_recent_crops_from_camera
@@ -178,13 +184,15 @@ class ToolScannerGUI(
         release_url,
         zip_url,
     ):
-        QTimer.singleShot(
-            0,
-            lambda: self.show_update_dialog(
-                latest_version,
-                release_url,
-                zip_url,
-            ),
+        print(
+            f"[GUI] Update callback received: {latest_version}",
+            flush=True,
+        )
+
+        self.show_update_signal.emit(
+            latest_version,
+            release_url,
+            zip_url,
         )
 
     def show_update_dialog(
@@ -193,6 +201,8 @@ class ToolScannerGUI(
         release_url,
         zip_url,
     ):
+        print("[GUI] Opening update dialog", flush=True)
+
         result = QMessageBox.question(
             self,
             "Update Available",
@@ -210,28 +220,7 @@ class ToolScannerGUI(
         if result != QMessageBox.Yes:
             return
 
-        self.download_and_install_update(
-            zip_url
-        )
-
-    def download_and_install_update(
-        self,
-        zip_url,
-    ):
-        QMessageBox.information(
-            self,
-            "Updating",
-            (
-                "The update is being downloaded.\n\n"
-                "Object Scanner will restart "
-                "automatically when finished."
-            ),
-        )
-
-        download_update(
-            zip_url,
-            self.update_download_finished,
-        )
+        self.download_and_install_update(zip_url)
 
     def update_download_finished(
         self,
