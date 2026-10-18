@@ -215,21 +215,20 @@ class ToolScannerGUI(
     ):
         print("[GUI] Opening update dialog", flush=True)
 
-        result = QMessageBox.question(
-            self,
+        result = self.show_themed_message_box(
             "Update Available",
             (
-                "A new version of Object Scanner "
-                "is available.\n\n"
+                "A new version of Object Scanner is available.\n\n"
                 f"Current version: {APP_VERSION}\n"
                 f"Latest version: {latest_version}\n\n"
                 "Would you like to update now?"
             ),
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
+            QMessageBox.Icon.Question,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
 
-        if result != QMessageBox.Yes:
+        if result != QMessageBox.StandardButton.Yes:
             return
 
         self.download_and_install_update(zip_url)
@@ -237,11 +236,12 @@ class ToolScannerGUI(
     def download_and_install_update(self, zip_url):
         print("[GUI] Starting update download...", flush=True)
 
-        QMessageBox.information(
-            self,
+        self.show_themed_message_box(
             "Updating",
             "The update is being downloaded.\n\n"
             "Object Scanner will restart automatically when finished.",
+            QMessageBox.Icon.Information,
+            QMessageBox.StandardButton.Ok,
         )
 
         try:
@@ -253,10 +253,11 @@ class ToolScannerGUI(
             print("[GUI] Download task started.", flush=True)
         except Exception as e:
             print(f"[GUI] Failed to start download: {e}", flush=True)
-            QMessageBox.critical(
-                self,
+            self.show_themed_message_box(
                 "Update Error",
                 f"Could not start the update download:\n{e}",
+                QMessageBox.Icon.Critical,
+                QMessageBox.StandardButton.Ok,
             )
 
     def update_download_finished(
@@ -270,11 +271,65 @@ class ToolScannerGUI(
         )
 
     def show_update_error(self, message):
-        QMessageBox.critical(
-            self,
+        self.show_themed_message_box(
             "Update Download Failed",
             f"Could not download the update:\n\n{message}",
+            QMessageBox.Icon.Critical,
+            QMessageBox.StandardButton.Ok,
         )
+
+    def show_themed_message_box(
+        self,
+        title,
+        message,
+        icon,
+        buttons,
+        default_button=None,
+    ):
+        mode = self.appearance_controller.get_mode()
+
+        panel_bg = AppearanceController.get_color(PANEL_BG, mode)
+        card_bg = AppearanceController.get_color(CARD_BG, mode)
+        border = AppearanceController.get_color(BORDER_COLOR, mode)
+        text = AppearanceController.get_color(TEXT_COLOR, mode)
+
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle(title)
+        dialog.setText(message)
+        dialog.setIcon(icon)
+        dialog.setStandardButtons(buttons)
+
+        if default_button is not None:
+            dialog.setDefaultButton(default_button)
+
+        dialog.setStyleSheet(
+            f"""
+            QMessageBox {{
+                background-color: {panel_bg};
+                color: {text};
+            }}
+
+            QMessageBox QLabel {{
+                background-color: transparent;
+                color: {text};
+            }}
+
+            QMessageBox QPushButton {{
+                background-color: {card_bg};
+                color: {text};
+                border: 1px solid {border};
+                border-radius: 6px;
+                padding: 7px 16px;
+                min-width: 70px;
+            }}
+
+            QMessageBox QPushButton:hover {{
+                background-color: {AppearanceController.get_color(CARD_HOVER, mode)};
+            }}
+            """
+        )
+
+        return dialog.exec()
 
     def finish_update(
         self,
