@@ -5,6 +5,7 @@ import sys
 import tempfile
 import threading
 import urllib.request
+import zipfile
 
 
 GITHUB_API_URL = (
@@ -88,20 +89,89 @@ def _check_for_updates(
         )
 
 
-def download_update(
-    zip_url,
-    callback,
-):
-    thread = threading.Thread(
-        target=_download_update,
-        args=(
-            zip_url,
-            callback,
-        ),
-        daemon=True,
-    )
 
-    thread.start()
+def download_update(zip_url, callback):
+    import tempfile
+    import threading
+    import urllib.request
+    import traceback
+
+    def worker():
+        temp_dir = None
+
+        try:
+            print("[UPDATER] Starting download...", flush=True)
+            print(f"[UPDATER] URL: {zip_url}", flush=True)
+
+            temp_dir = tempfile.mkdtemp(
+                prefix="object_scanner_update_"
+            )
+            zip_path = os.path.join(
+                temp_dir,
+                "update.zip",
+            )
+
+            request = urllib.request.Request(
+                zip_url,
+                headers={
+                    "User-Agent": "ObjectScanner-Updater"
+                },
+            )
+
+            print("[UPDATER] Opening download URL...", flush=True)
+
+            with urllib.request.urlopen(
+                request,
+                timeout=60,
+            ) as response:
+                total = int(
+                    response.headers.get(
+                        "Content-Length", 0
+                    )
+                )
+                downloaded = 0
+
+                with open(zip_path, "wb") as file:
+                    while True:
+                        chunk = response.read(1024 * 256)
+                        if not chunk:
+                            break
+
+                        file.write(chunk)
+                        downloaded += len(chunk)
+
+                        if total:
+                            print(
+                                f"[UPDATER] Downloaded "
+                                f"{downloaded}/{total} bytes",
+                                flush=True,
+                            )
+
+            print(
+                f"[UPDATER] Download complete: {zip_path}",
+                flush=True,
+            )
+
+            if not zipfile.is_zipfile(zip_path):
+                raise RuntimeError(
+                    "Downloaded file is not a valid ZIP archive."
+                )
+
+            print("[UPDATER] Calling download callback...", flush=True)
+            callback(temp_dir, zip_path)
+
+        except Exception as e:
+            print(
+                f"[UPDATER] Download failed: {e}",
+                flush=True,
+            )
+            traceback.print_exc()
+
+    threading.Thread(
+        target=worker,
+        daemon=True,
+    ).start()
+
 
 
 def _download_update(
