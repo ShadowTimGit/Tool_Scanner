@@ -222,24 +222,29 @@ class ToolScannerGUI(
 
         self.download_and_install_update(zip_url)
 
-    def download_and_install_update(
-        self,
-        zip_url,
-    ):
+    def download_and_install_update(self, zip_url):
+        print("[GUI] Starting update download...", flush=True)
+
         QMessageBox.information(
             self,
             "Updating",
-            (
-                "The update is being downloaded.\n\n"
-                "Object Scanner will restart "
-                "automatically when finished."
-            ),
+            "The update is being downloaded.\n\n"
+            "Object Scanner will restart automatically when finished.",
         )
 
-        download_update(
-            zip_url,
-            self.update_download_finished,
-        )
+        try:
+            download_update(
+                zip_url,
+                self.update_download_finished,
+            )
+            print("[GUI] Download task started.", flush=True)
+        except Exception as e:
+            print(f"[GUI] Failed to start download: {e}", flush=True)
+            QMessageBox.critical(
+                self,
+                "Update Error",
+                f"Could not start the update download:\n{e}",
+            )
 
     def update_download_finished(
         self,
