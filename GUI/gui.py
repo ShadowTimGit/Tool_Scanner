@@ -222,6 +222,25 @@ class ToolScannerGUI(
 
         self.download_and_install_update(zip_url)
 
+    def download_and_install_update(
+        self,
+        zip_url,
+    ):
+        QMessageBox.information(
+            self,
+            "Updating",
+            (
+                "The update is being downloaded.\n\n"
+                "Object Scanner will restart "
+                "automatically when finished."
+            ),
+        )
+
+        download_update(
+            zip_url,
+            self.update_download_finished,
+        )
+
     def update_download_finished(
         self,
         temp_dir,
