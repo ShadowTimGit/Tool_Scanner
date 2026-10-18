@@ -1,4 +1,4 @@
 @echo off
 cd /d "%~dp0"
-python main.py
-pause
+start "" ".venv\Scripts\pythonw.exe" main.py
+exit

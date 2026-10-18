@@ -44,7 +44,7 @@ SETTINGS_DIR = os.path.join(
 
 METADATA_FILE = os.path.join(
     SETTINGS_DIR,
-    "metadata.json",
+    "metadata_options.json",
 )
 
 
@@ -1120,6 +1120,26 @@ class MetadataSettings(QWidget):
                 "end",
                 value,
             )
+
+    def refresh_metadata(self):
+        self.metadata = self.load_metadata()
+
+        self.populate_size_list()
+
+        for listbox, key in (
+            (self.point_list, "point"),
+            (self.drive_list, "drive"),
+        ):
+            listbox.items = []
+            listbox.selected_index = None
+            listbox.refresh()
+
+            self.populate_list(
+                listbox,
+                self.metadata.get(key, []),
+            )
+
+        self.update()
 
     # =====================================================
     # POINT EDITOR

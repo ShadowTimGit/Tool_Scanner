@@ -790,6 +790,23 @@ class GeneralSettings(QWidget):
                 indent=4,
             )
 
+        # Refresh the existing Product Attributes widget.
+        settings_window = getattr(
+            self.main_gui,
+            "settings_window",
+            None,
+        )
+
+        if settings_window is not None:
+            metadata_settings = getattr(
+                settings_window,
+                "metadata_settings",
+                None,
+            )
+
+            if metadata_settings is not None:
+                metadata_settings.refresh_metadata()
+
         tools_path = os.path.join(
             os.path.dirname(__file__),
             "settings",

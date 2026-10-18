@@ -313,12 +313,12 @@ class ToolSettings(QWidget):
     # =========================================================
 
     def create_gui(self):
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+
         self.main_frame = QFrame(self)
-
-        self.main_frame.setObjectName(
-            "toolSettingsMainFrame"
-        )
-
+        self.main_frame.setObjectName("toolSettingsMainFrame")
         self.main_frame.setSizePolicy(
             QSizePolicy.Expanding,
             QSizePolicy.Expanding,
@@ -333,77 +333,48 @@ class ToolSettings(QWidget):
             """
         )
 
-        main_layout = QVBoxLayout(
-            self.main_frame
-        )
+        root_layout.addWidget(self.main_frame)
 
-        main_layout.setContentsMargins(
-            12,
-            12,
-            12,
-            12,
-        )
-
+        main_layout = QVBoxLayout(self.main_frame)
+        main_layout.setContentsMargins(12, 12, 12, 12)
         main_layout.setSpacing(0)
 
-        self.columns = QWidget(
-            self.main_frame
-        )
-
+        self.columns = QWidget(self.main_frame)
         self.columns.setSizePolicy(
             QSizePolicy.Expanding,
             QSizePolicy.Expanding,
         )
+        self.columns.setStyleSheet("background: transparent;")
 
-        self.columns.setStyleSheet(
-            "background: transparent;"
-        )
-
-        columns_layout = QGridLayout(
-            self.columns
-        )
-
-        columns_layout.setContentsMargins(
-            0,
-            0,
-            0,
-            0,
-        )
-
+        columns_layout = QGridLayout(self.columns)
+        columns_layout.setContentsMargins(0, 0, 0, 0)
         columns_layout.setHorizontalSpacing(12)
         columns_layout.setVerticalSpacing(0)
 
         columns_layout.setColumnStretch(0, 1)
         columns_layout.setColumnStretch(1, 1)
-
         columns_layout.setRowStretch(0, 1)
 
-        main_layout.addWidget(
-            self.columns
+        main_layout.addWidget(self.columns, 1)
+
+        self.create_add_section(self.columns)
+        self.create_remove_section(self.columns)
+
+        self.add_frame.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Expanding,
+        )
+        self.remove_frame.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Expanding,
         )
 
-        self.create_add_section(
-            self.columns
-        )
-
-        self.create_remove_section(
-            self.columns
-        )
-
-        columns_layout.addWidget(
-            self.add_frame,
-            0,
-            0,
-        )
-
-        columns_layout.addWidget(
-            self.remove_frame,
-            0,
-            1,
-        )
+        columns_layout.addWidget(self.add_frame, 0, 0)
+        columns_layout.addWidget(self.remove_frame, 0, 1)
 
         self.refresh_brand_dropdown()
         self.refresh_tool_dropdown()
+
     # =========================================================
     # Helpers
     # =========================================================
