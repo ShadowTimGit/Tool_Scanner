@@ -372,39 +372,27 @@ class CameraProcessor(
     def _process_frame_sync(self, frame):
         """
         Actual frame processing.
-
-        This method runs exclusively on the
-        CameraProcessing background thread.
+        This method runs exclusively on the CameraProcessing background thread.
         """
 
         self.box_manager.initialize(frame)
 
         original_frame = frame.copy()
 
-        detections = self._detect_objects(
-            frame
-        )
+        detections = self._detect_objects(frame)
 
-        objects = self._update_tracked_objects(
-            detections
-        )
+        objects = self._update_tracked_objects(detections)
 
-        current_time = (
-            self._get_current_capture_time()
-        )
+        current_time = self._get_current_capture_time()
 
-        red_detected = self._check_red_scan(
-            original_frame
-        )
+        red_detected = self._check_red_scan(original_frame)
 
-        objects_inside = (
-            self._process_tracked_objects(
-                frame=frame,
-                original_frame=original_frame,
-                objects=objects,
-                red_detected=red_detected,
-                current_time=current_time,
-            )
+        objects_inside = self._process_tracked_objects(
+            frame=frame,
+            original_frame=original_frame,
+            objects=objects,
+            red_detected=red_detected,
+            current_time=current_time,
         )
 
         self._handle_manual_capture(
@@ -412,9 +400,7 @@ class CameraProcessor(
             objects=objects,
         )
 
-        self._update_counting_state(
-            objects_inside
-        )
+        self._update_counting_state(objects_inside)
 
         detection_count = (
             len(detections)
@@ -560,6 +546,7 @@ class CameraProcessor(
         self.counting_object_ids.clear()
 
         return True
+
 
     def set_inventory_type(
         self,
@@ -713,20 +700,16 @@ class CameraProcessor(
 
     def set_box_display(
         self,
+        show_scan_box,
         show_crop_box,
         show_counting_box,
     ):
-
-        self.show_crop_box = (
-            show_crop_box
-        )
-
-        self.show_counting_box = (
-            show_counting_box
-        )
+        self.show_scan_box = show_scan_box
+        self.show_crop_box = show_crop_box
+        self.show_counting_box = show_counting_box
 
         self.box_manager.set_box_display(
-            True,
+            show_scan_box,
             show_crop_box,
             show_counting_box,
         )

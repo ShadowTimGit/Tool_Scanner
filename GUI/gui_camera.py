@@ -49,6 +49,10 @@ class CameraMixin:
         self.camera = camera
         self.camera_ready = True
 
+        self.camera.set_require_red_for_automatic(
+            self.require_red_check.isChecked()
+        )
+
         self.camera.set_metadata_sync_callback(
             self.update_camera_metadata
         )

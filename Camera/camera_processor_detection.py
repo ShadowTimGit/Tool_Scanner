@@ -725,17 +725,15 @@ class CameraDetectionMixin:
                 2,
             )
 
-    def _draw_scan_box(
-        self,
-        frame,
-    ):
+    def _draw_scan_box(self, frame):
 
-        if self.scan_box is None:
+        if (
+            self.scan_box is None
+            or not self.show_scan_box
+        ):
             return
 
-        x1, y1, x2, y2 = (
-            self.scan_box
-        )
+        x1, y1, x2, y2 = self.scan_box
 
         cv2.rectangle(
             frame,
@@ -750,10 +748,7 @@ class CameraDetectionMixin:
             "Scan Dot",
             (
                 x1 - 10,
-                max(
-                    y1 - 10,
-                    20,
-                ),
+                max(y1 - 10, 20),
             ),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,

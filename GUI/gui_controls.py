@@ -500,13 +500,16 @@ class ControlsMixin:
         # Require Red
         # --------------------------------------------------------------
 
+        checkbox_settings = self.load_checkbox_settings()
+
+        self.show_scan_box = checkbox_settings["require_red_scan"]
 
         self.require_red_check = XCheckBox(
             "Require Red Scan"
         )
 
         self.require_red_check.setChecked(
-            False
+            checkbox_settings["require_red_scan"]
         )
 
         self.require_red_check.setFont(
@@ -1198,19 +1201,45 @@ class ControlsMixin:
                 """
             )
 
+    def load_checkbox_settings(self):
+        defaults = {
+            "require_red_scan": False,
+            "show_crop_box": False,
+            "show_counting_box": False,
+        }
+
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+
+            defaults.update({
+                key: saved[key]
+                for key in defaults
+                if key in saved
+            })
+
+        except (OSError, ValueError, TypeError):
+            pass
+
+        return defaults
+
     # ------------------------------------------------------------------
     # Require red
     # ------------------------------------------------------------------
 
-    def on_require_red_changed(
-        self,
-        checked,
-    ):
+    def on_require_red_changed(self, checked):
+        self.show_scan_box = checked
+        self.save_checkbox_settings()
+
         if self.camera is None:
             return
 
-        self.camera.set_require_red_for_automatic(
-            checked
+        self.camera.set_require_red_for_automatic(checked)
+
+        self.camera.set_box_display(
+            self.show_scan_box,
+            self.show_crop_box,
+            self.show_counting_box,
         )
 
     # ------------------------------------------------------------------
@@ -1356,6 +1385,47 @@ class ControlsMixin:
             self.BELOW_WEBCAM_ORDER["status_label"],
         )
 
+    def load_checkbox_settings(self):
+        defaults = {
+            "require_red_scan": False,
+            "show_crop_box": False,
+            "show_counting_box": False,
+        }
+
+        try:
+            with open(SETTINGS_FILE, "r") as f:
+                settings = json.load(f)
+
+            defaults.update({
+                key: settings[key]
+                for key in defaults
+                if key in settings
+            })
+
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+
+        return defaults
+
+
+    def save_checkbox_settings(self):
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                settings = json.load(f)
+        except (OSError, ValueError, TypeError):
+            settings = {}
+
+        settings.update({
+            "require_red_scan": self.require_red_check.isChecked(),
+            "show_crop_box": self.crop_box_check.isChecked(),
+            "show_counting_box": self.counting_box_check.isChecked(),
+        })
+
+        os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
+
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=4)
+
     # ------------------------------------------------------------------
     # Count
     # ------------------------------------------------------------------
@@ -1439,6 +1509,8 @@ class ControlsMixin:
         self,
         parent,
     ):
+        checkbox_settings = self.load_checkbox_settings()
+        
         self.crop_box_var = False
 
         self.crop_box_check = XCheckBox(
@@ -1447,7 +1519,7 @@ class ControlsMixin:
         )
 
         self.crop_box_check.setChecked(
-            False
+            checkbox_settings["show_crop_box"]
         )
 
         self.crop_box_check.setFont(
@@ -1474,7 +1546,7 @@ class ControlsMixin:
         )
 
         self.counting_box_check.setChecked(
-            False
+            checkbox_settings["show_counting_box"]
         )
 
         self.counting_box_check.setFont(
@@ -1529,27 +1601,22 @@ class ControlsMixin:
         )
 
     def update_box_display(self):
-        self.show_crop_box = (
-            self.crop_box_check.isChecked()
-        )
+        self.show_scan_box = self.require_red_check.isChecked()
+        self.show_crop_box = self.crop_box_check.isChecked()
+        self.show_counting_box = self.counting_box_check.isChecked()
 
-        self.show_counting_box = (
-            self.counting_box_check.isChecked()
-        )
+        self.crop_box_var = self.show_crop_box
+        self.counting_box_var = self.show_counting_box
 
-        self.crop_box_var = (
-            self.show_crop_box
-        )
-
-        self.counting_box_var = (
-            self.show_counting_box
-        )
 
         if self.camera is not None:
             self.camera.set_box_display(
+                self.show_scan_box,
                 self.show_crop_box,
                 self.show_counting_box,
             )
+
+        self.save_checkbox_settings()
 
     # ------------------------------------------------------------------
     # Action buttons
